@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Estilo basado en el template "Apex": crema + verde oscuro, Nunito, píldoras, tarjetas redondeadas y sombras suaves. */
+@layer base {
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { @apply bg-surface text-on-surface font-body antialiased; font-weight: 400; }
+  h1, h2, h3, h4 { @apply font-head tracking-tight; font-weight: 600; }
+  .tnum { font-variant-numeric: tabular-nums; }
+  ::selection { background: #e4eedb; color: #19201a; }
+  /* Cajas con borde completo: esquinas redondeadas como en Apex (los rounded-* explícitos tienen prioridad) */
+  :where([class~="border"], [class~="border-2"]) { border-radius: .9rem; }
+  :where(img[class~="border"]) { border-radius: .9rem; }
+  /* Bordes "negros" de la estética anterior: se suavizan salvo en elementos oscuros */
+  [class*="border-slate-950"]:not([class*="bg-slate-950"]):not([class*="btn"]):not([class*="chip"]) { border-color: rgba(26, 35, 27, .16); }
+  [class*="border-slate-400"] { border-color: #dedfd5; }
+}
+
+@layer components {
+  .ms { font-family: 'Material Symbols Outlined'; font-weight: normal; font-style: normal; font-size: 20px; line-height: 1;
+        letter-spacing: normal; text-transform: none; display: inline-block; white-space: nowrap; direction: ltr;
+        -webkit-font-smoothing: antialiased; font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        vertical-align: middle; overflow: hidden; width: 1em; }
+  .ms-fill { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+
+  /* Tarjetas: fondo card, borde suave, radio grande */
+  .card { @apply bg-surface-container-lowest border border-outline-variant rounded-[1.4rem] shadow-[0_1px_2px_rgba(26,35,27,.04)]; }
+  .card-pad { @apply p-5 md:p-7; }
+  .sec-title { @apply font-head text-base md:text-[17px] font-semibold tracking-tight flex items-center gap-2 text-on-surface; }
+  /* Etiquetas tipo "eyebrow" de Apex: mono, mayúsculas, espaciado amplio */
+  .lbl { @apply font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-on-surface-variant block mb-1.5; }
+  .eyebrow { @apply font-mono text-xs uppercase tracking-[0.18em] text-on-surface-variant; }
+  .inp { @apply w-full bg-surface-container-lowest border border-outline-variant rounded-[.8rem] px-3.5 py-2.5 text-sm font-body outline-none transition-shadow focus:border-ring focus:ring-[3px] focus:ring-ring/30; }
+  .inp-err { @apply border-2 border-red-500; }
+
+  /* Botones tipo píldora */
+  .btn { @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full font-head font-semibold text-sm border border-transparent transition-all select-none cursor-pointer active:translate-y-px disabled:opacity-40 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-primary-container text-[#f7f5ef] hover:bg-primary-container/85; }
+  .btn-success { @apply btn bg-tertiary-container text-white hover:bg-tertiary; }
+  .btn-danger  { @apply btn bg-surface-container-lowest text-red-600 border-red-200 hover:bg-red-600 hover:text-white hover:border-red-600; }
+  .btn-ghost   { @apply btn bg-surface-container-lowest text-on-surface border-outline-variant hover:bg-surface-container; }
+  .btn-dark    { @apply btn bg-slate-950 text-[#f5f3ec] hover:bg-slate-900; }
+  .btn-sm { @apply px-3.5 py-1.5 text-xs; }
+
+  /* Chips/pills */
+  .chip { @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[10px] font-medium uppercase tracking-[0.08em] border border-transparent whitespace-nowrap; }
+  .chip-blue  { @apply chip bg-[#e4eedb] text-[#1f3a25]; }
+  .chip-green { @apply chip bg-[#11a22f]/15 text-[#0b6420]; }
+  .chip-amber { @apply chip bg-amber-100 text-amber-900; }
+  .chip-red   { @apply chip bg-red-100 text-red-800; }
+  .chip-gray  { @apply chip bg-[#ecebe2] text-[#5c675c]; }
+  .chip-dark  { @apply chip bg-slate-950 text-[#f5f3ec]; }
+
+  .money { @apply font-head font-bold tnum tracking-tight; }
+  .navlink { @apply px-3.5 py-2 rounded-full font-head text-sm font-medium leading-tight text-on-surface/70 transition-colors hover:text-on-surface hover:bg-surface-container; }
+  .navlink.active { @apply bg-primary-container text-[#f7f5ef] hover:text-[#f7f5ef] hover:bg-primary-container; }
+
+  .pin-box { @apply w-14 h-16 md:w-16 md:h-[72px] text-center font-head text-3xl font-bold tnum border-2 border-outline-variant rounded-xl bg-white outline-none focus:border-ring; }
+  .tbl th { @apply text-left font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-on-surface-variant px-3 py-2.5 bg-surface-container-low border-b border-outline-variant; }
+  .tbl td { @apply px-3 py-3 border-b border-outline-variant/70 align-middle text-sm; }
+}
+
+.modal-backdrop { background: rgba(28, 41, 30, .5); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.fade-in { animation: fadein .25s cubic-bezier(0, 0, .2, 1); }
+@keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.scroll-x { overflow-x: auto; scrollbar-width: none; }
+.scroll-x::-webkit-scrollbar { display: none; }
