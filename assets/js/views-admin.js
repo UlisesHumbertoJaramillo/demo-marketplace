@@ -23,12 +23,12 @@
       comisiones: sum((s) => s.escrow.comisionCobrada) + sumV((p) => p.fee),
       costoMP: sum((s) => s.escrow.costoMPTotal) + sumV((p) => p.mpFee),
       reembolsado: sum((s) => s.escrow.reembolsado) + V.reduce((a, p) => a + (p.reembolsado || 0), 0),
-      garantia: sum((s) => s.escrow.garantia),
-      deudas: A.state.users.reduce((a, u) => a + (u.deuda || 0), 0),
+      reembPend: (A.state.reembolsosPendientes || []).reduce((a, x) => a + x.monto, 0),
+      nPendientes: (A.state.reembolsosPendientes || []).length,
       disputas: S.filter((s) => s.estado === 'en_disputa').length,
       mediacion: S.filter((s) => s.estado === 'en_disputa' && s.disputa.fase === 'mediacion').length,
       vencidos: S.filter((s) => s.estado === 'en_disputa' && s.disputa.fase === 'arbitraje' && A.parseFecha(s.disputa.venceArbitro) < new Date()).length,
-      pendienteCliente: sum((s) => s.escrow.pendienteCliente),
+
       tasaPin: cerradas + resueltas ? Math.round((cerradas / (cerradas + resueltas)) * 100) : 100,
       pendientes: A.state.users.filter((u) => u.rol === 'prestador' && u.estado === 'pendiente').length,
     };
@@ -44,7 +44,7 @@
         ${tile('border-t-primary-container', 'Cobrado con split', A.money(m.cobrado), `${m.nPagos} pagos · falta cobrar ${A.money(m.porCobrar)} en etapas`, 'payments')}
         ${tile('border-t-tertiary', 'Acreditado a prestadores', A.money(m.prestadores), `Cerrados sin arbitraje: ${m.tasaPin}%`, 'account_balance_wallet')}
         ${tile('border-t-secondary-container', 'Comisiones (application_fee)', A.money(m.comisiones), `Costo MP: ${A.money(m.costoMP)} · reembolsado: ${A.money(m.reembolsado)}`, 'percent')}
-        ${tile('border-t-red-500', 'Disputas abiertas', m.disputas + ' casos', `${m.mediacion} en mediación · ${m.vencidos} con plazo vencido · Deuda de prestadores: ${A.money(m.deudas)} · fondo de garantía usado: ${A.money(m.garantia)}${m.pendienteCliente ? ` · pendiente de reintegro: ${A.money(m.pendienteCliente)}` : ''}`, 'gavel')}
+        ${tile('border-t-red-500', 'Disputas abiertas', m.disputas + ' casos', `${m.mediacion} en mediación · ${m.vencidos} con plazo vencido · Reembolsos pendientes por falta de saldo: ${A.money(m.reembPend)} (${m.nPendientes})`, 'gavel')}
       </div>` : `<div class="card p-4 text-sm text-on-surface-variant">${A.icon('lock', '!text-base')} Tu usuario no tiene permiso para ver métricas financieras.</div>`;
 
     const tabs = [['prestadores', 'Prestadores', m.pendientes], ['solicitantes', 'Solicitantes', A.state.users.filter((u) => u.rol === 'cliente' && (u.reportes || []).some((r) => !r.resuelto)).length],
@@ -105,13 +105,13 @@
   };
   /* Configuración de disputas y garantías */
   const CFG_DISP = [['plazoMediacion', 'Mediación entre partes (horas)', 72, 1, 240], ['plazoVisita', 'Visitas: confirmación y respuesta a "no vino" (horas)', 48, 1, 240], ['plazoArbitro', 'Plazo del árbitro (días hábiles)', 10, 1, 60], ['plazoCorreccion', 'Corrección por defecto (días)', 5, 1, 30],
-    ['plazoReclamo', 'Reclamos por garantía (días desde el cierre)', 90, 1, 365], ['topeGarantia', 'Tope del fondo de garantía por caso ($)', 100000, 0, 10000000], ['deudaMaxima', 'Deuda máxima antes de suspender ($)', 50000, 0, 10000000]];
+    ['plazoReclamo', 'Reclamos por garantía (días desde el cierre)', 90, 1, 365], ['maxEtapaPct', 'Tamaño máximo de una etapa (% del presupuesto)', 40, 10, 100]];
   function configDisputasCard(me) {
     if (!can(me, 'metricas') && !can(me, 'permisos')) return '';
     const f = (A.ui.cfgDisp = A.ui.cfgDisp || Object.fromEntries(CFG_DISP.map(([k, , d]) => [k, String(A.cfg(k, d))])));
     return `<div class="card p-4 md:p-5 space-y-3">
-      <div class="sec-title">${A.icon('gavel')} Disputas y garantías</div>
-      <p class="text-xs text-on-surface-variant max-w-3xl">Toda disputa empieza con una mediación entre las partes; si no hay acuerdo en el plazo, pasa al árbitro, que tiene un plazo para resolver. El fondo de garantía cubre al cliente cuando un reembolso falla por falta de saldo del prestador, hasta un tope por caso; si la deuda del prestador supera el máximo, su cuenta se suspende automáticamente.</p>
+      <div class="sec-title">${A.icon('gavel')} Disputas, garantías y etapas</div>
+      <p class="text-xs text-on-surface-variant max-w-3xl">Toda disputa empieza con una mediación entre las partes; si no hay acuerdo en el plazo, pasa al árbitro, que tiene un plazo para resolver. Con el split de Mercado Pago solo hay reembolsos totales por pago y no hay fondo de garantía: si un reembolso falla por falta de saldo del prestador, queda pendiente y el prestador se suspende hasta que se ejecute. Limitar el tamaño de cada etapa acota lo que está en juego en una disputa.</p>
       <div class="flex flex-wrap items-end gap-3">
         ${CFG_DISP.map(([k, t, , min, max]) => `<div><label class="lbl">${t}</label><input type="number" min="${min}" max="${max}" class="inp w-36 font-head font-bold" data-model="cfgDisp.${k}" value="${esc(f[k])}"></div>`).join('')}
         <button class="btn-primary" data-action="cfg-disputas">${A.icon('check')} Guardar</button>
@@ -141,7 +141,7 @@
         <td><div class="font-semibold">${esc(A.fullName(u))}</div><div class="text-xs text-on-surface-variant">${esc(u.zona || '')}</div></td>
         <td class="font-head tnum text-xs">${esc(u.dni)}</td>
         <td><div class="text-sm">${esc(u.oficio)}</div><div class="text-xs text-primary font-head">${esc(u.matricula || '—')}</div>
-          <div class="flex flex-wrap gap-1 mt-1">${u.mpCuenta ? `<span class="chip-blue" title="${esc(u.mpCuenta.usuario)}">MP vinculada · KYC ${u.mpCuenta.kyc || '?'}</span>` : '<span class="chip-red">Sin cuenta MP</span>'}${u.deuda ? `<span class="chip-red">Deuda ${A.money(u.deuda)}</span>` : ''}${u.suspendidoPorDeuda && u.estado === 'suspendido' ? '<span class="chip-red">Suspendido por deuda</span>' : ''}${(() => { const d = A.statsDisputas(u.id); return (d.enContraPrestador ? `<span class="chip-amber">${d.enContraPrestador} fallo(s) en contra</span>` : '') + (d.garantiaSinResolver ? `<span class="chip-amber">${d.garantiaSinResolver} garantía(s) sin resolver</span>` : '') + (d.revisar ? '<span class="chip-red">Revisar</span>' : ''); })()}${u.matriculaRequerida ? '<span class="chip-amber">Matrícula obligatoria</span>' : ''}${u.matriculaFoto ? `<button class="chip-blue" data-action="zoom" data-src="${u.matriculaFoto}">${A.icon('image', '!text-xs')} Foto matrícula</button>` : ''}${(u.reportes || []).some((r) => !r.resuelto) ? `<span class="chip-red">${(u.reportes || []).filter((r) => !r.resuelto).length} denuncia(s)</span>` : ''}</div></td>
+          <div class="flex flex-wrap gap-1 mt-1">${u.mpCuenta ? `<span class="chip-blue" title="${esc(u.mpCuenta.usuario)}">MP vinculada · KYC ${u.mpCuenta.kyc || '?'}</span>` : '<span class="chip-red">Sin cuenta MP</span>'}${A.pendientesDe((x) => x.prestadorId === u.id).length ? `<span class="chip-red">Reembolso pendiente ${A.money(A.pendientesDe((x) => x.prestadorId === u.id).reduce((a, x) => a + x.monto, 0))}</span>` : ''}${u.suspendidoPorReembolso && u.estado === 'suspendido' ? '<span class="chip-red">Suspendido hasta reembolsar</span>' : ''}${(() => { const d = A.statsDisputas(u.id); return (d.enContraPrestador ? `<span class="chip-amber">${d.enContraPrestador} fallo(s) en contra</span>` : '') + (d.garantiaSinResolver ? `<span class="chip-amber">${d.garantiaSinResolver} garantía(s) sin resolver</span>` : '') + (d.revisar ? '<span class="chip-red">Revisar</span>' : ''); })()}${u.matriculaRequerida ? '<span class="chip-amber">Matrícula obligatoria</span>' : ''}${u.matriculaFoto ? `<button class="chip-blue" data-action="zoom" data-src="${u.matriculaFoto}">${A.icon('image', '!text-xs')} Foto matrícula</button>` : ''}${(u.reportes || []).some((r) => !r.resuelto) ? `<span class="chip-red">${(u.reportes || []).filter((r) => !r.resuelto).length} denuncia(s)</span>` : ''}</div></td>
         <td>${u.foto ? `<button data-action="zoom" data-src="${u.foto}" class="flex items-center gap-2">${A.avatar(u, 'w-10 h-10')}<span class="chip-blue">Ver</span></button>` : '<span class="chip-red">Sin foto</span>'}</td>
         <td>${u.emailVerificado ? '<span class="chip-green">Verificado</span>' : '<span class="chip-amber">Sin verificar</span>'}</td>
         <td>${estadoU[u.estado]}</td>
@@ -285,6 +285,10 @@
         <div class="scroll-x flex gap-2 pb-1">${lista.length ? lista.map(caseTab).join('') : `<div class="text-sm text-on-surface-variant p-4 card w-full">No hay casos ${filtro}.${me.rol === 'arbitro' ? ' (Ves los casos asignados a vos y los sin asignar.)' : ''}</div>`}</div>
         ${sel ? caso(sel, me) : ''}
         ${A.visitasArbitrajeHtml(me)}
+        ${(A.state.reembolsosPendientes || []).length ? `<div class="card p-4 md:p-5 space-y-2"><div class="sec-title">${A.icon('undo')} Reembolsos pendientes por falta de saldo (${A.state.reembolsosPendientes.length})</div>
+          <p class="text-xs text-on-surface-variant">Mercado Pago los rechazó porque el prestador no tiene saldo. El prestador queda suspendido hasta que se ejecuten. No hay fondo de garantía: el cliente puede además reclamar en Mercado Pago.</p>
+          ${A.state.reembolsosPendientes.map((x) => `<div class="flex flex-wrap items-center justify-between gap-2 border border-outline-variant p-2 text-sm"><span><b>${A.money(x.monto)}</b> · ${esc(x.concepto)} · ${esc(A.sol(x.solId).titulo)} · prestador ${esc(A.fullName(A.user(x.prestadorId)))} · ${esc(x.fecha)}</span>
+            <button class="btn-ghost btn-sm" data-action="rp-reintentar" data-r="${x.id}">Demo: reintentar (el prestador ya tiene saldo)</button></div>`).join('')}</div>` : ''}
       </div>`;
   };
   A.actions['arb-filtro'] = (el) => { A.ui.arbFiltro = el.dataset.v; A.go('#/arbitraje'); };
@@ -326,8 +330,8 @@
       <div class="sm:col-span-4 flex flex-wrap gap-2 text-xs">
         ${s.hitos.some((h) => h.auto) ? `<span class="chip-amber">Etapas aprobadas automáticamente: ${s.hitos.filter((h) => h.auto).length}</span>` : ''}
         <span class="chip-blue">Etapas aprobadas: ${hechos} de ${s.hitos.length} · pagadas: ${s.hitos.filter((h) => h.pagado).length}</span>
-        ${pr.deuda ? `<span class="chip-red">Deuda del prestador: ${A.money(pr.deuda)}</span>` : ''}
-        ${(d.propuestas || []).length ? `<span class="chip-gray">Propuestas en la mediación: ${d.propuestas.map((x) => `${x.por} → ${x.tipo === 'corregir' ? 'corregir en ' + x.plazo + ' días' : x.tipo === 'parcial' ? 'reembolso de ' + A.money(x.monto) : x.tipo} (${x.estado})`).join(' · ')}</span>` : ''}
+        ${A.pendientesDe((x) => x.prestadorId === pr.id).length ? `<span class="chip-red">Reembolsos pendientes del prestador: ${A.money(A.pendientesDe((x) => x.prestadorId === pr.id).reduce((a, x) => a + x.monto, 0))}</span>` : ''}
+        ${(d.propuestas || []).length ? `<span class="chip-gray">Propuestas en la mediación: ${d.propuestas.map((x) => `${x.por} → ${x.tipo === 'corregir' ? 'corregir en ' + x.plazo + ' días' : x.tipo === 'compensar' ? 'compensar ' + A.money(x.monto) : x.tipo === 'recobro' ? 'reembolso total + recobro de ' + A.money(x.monto) : x.tipo} (${x.estado})`).join(' · ')}</span>` : ''}
         ${A.statsDisputas(s.clienteId).revisar ? '<span class="chip-red">Cliente marcado para revisión (disputas perdidas)</span>' : ''}${A.statsDisputas(pr.id).revisar ? '<span class="chip-red">Prestador marcado para revisión (fallos en contra)</span>' : ''}
         ${s.ajuste ? `<span class="chip-amber">Ajuste de precio: ${A.money(s.ajuste.actual)} → ${A.money(s.ajuste.propuesto)} (${s.ajuste.estado})</span>` : ''}
         <span class="chip-gray">Presupuesto: mano de obra ${A.money(A.manoObra(p))} + insumos ${A.money(p.incluyeMateriales ? p.costoMateriales : 0)}</span>
@@ -350,49 +354,37 @@
     } else if (!puedeResolver) {
       dictamen = `<div class="card p-5 text-sm text-on-surface-variant">${A.icon('info')} ${me.rol === 'arbitro' && !d.arbitroId ? 'Tomá el caso para poder emitir el dictamen.' : 'Solo el árbitro asignado o un administrador pueden emitir el dictamen.'}</div>`;
     } else {
-      const enJ = A.enJuego(s); const pagos = A.pagosEnJuego(s);
-      const f = (A.ui.dict = A.ui.dict || {})[s.id] = (A.ui.dict[s.id] || { reembolso: String(Math.round(enJ * 0.3)), nota: '', sinSaldo: false, plazo: String(A.cfg('plazoCorreccion', 5)) });
-      const parc = calcParcial(s, Number(f.reembolso) || 0);
+      const enJ = A.enJuego(s); const pagos = A.pagosEnJuego(s); const sp = A.sinPagarInfo(s);
+      const f = (A.ui.dict = A.ui.dict || {})[s.id] = (A.ui.dict[s.id] || { compensar: '', recobro: '', nota: '', sinSaldo: false, plazo: String(A.cfg('plazoCorreccion', 5)) });
       const prestEnJ = pagos.reduce((a, p) => a + Math.round((p.recibe * (p.cliente - p.reembolsado)) / p.cliente), 0);
+      const montoInp = (k, ph) => `<label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" step="500" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="dict.${s.id}.${k}" value="${esc(f[k])}" placeholder="${ph}"></label>`;
+      const card = (titulo, sub, desc, inner, btn, cls = 'border border-outline-variant', dis = false) => `<div class="${cls} p-4 flex flex-col ${dis ? 'opacity-50' : ''}">
+          <div class="font-head font-bold text-sm uppercase">${titulo}</div><div class="font-head font-semibold">${sub}</div>
+          <p class="text-xs text-on-surface-variant my-2">${desc}</p>${inner}${dis ? '<div class="text-[11px] text-on-surface-variant mt-auto pt-2">No quedan etapas sin pagar.</div>' : btn}</div>`;
       dictamen = `<div class="card p-4 md:p-5">
         <div class="flex flex-wrap justify-between gap-2 items-center mb-1"><div class="sec-title">${A.icon('terminal')} Panel de dictamen y ejecución financiera</div>
-          <span class="font-mono text-[10px] bg-surface-container px-2 py-1">POST /v1/payments/{id}/refunds</span></div>
+          <span class="font-mono text-[10px] bg-surface-container px-2 py-1">Solo reembolsos totales por pago</span></div>
         ${vencido ? `<div class="bg-red-50 border border-red-500 text-red-700 text-xs p-2 mb-3">${A.icon('warning', '!text-sm')} Venció el plazo para resolver (${A.cfg('plazoArbitro', 10)} días hábiles). Resolvé cuanto antes: Mercado Pago permite reembolsar solo hasta 180 días después del pago.</div>` : ''}
-        <p class="text-xs text-on-surface-variant mb-3">Se resuelve sobre el <b>pago de la etapa en curso (${A.money(enJ)})</b>, que ya está en la cuenta del prestador: lo aprobado por el cliente no se discute. El reembolso se le pide a Mercado Pago, que lo descuenta en proporción de la cuenta del prestador y de la comisión. Las etapas sin pagar se cancelan. Al confirmar se notifica a ambas partes por email.</p>
+        <p class="text-xs text-on-surface-variant mb-3">Se resuelve sobre el <b>pago de la etapa en curso (${A.money(enJ)})</b>, que ya está en la cuenta del prestador; lo aprobado por el cliente no se discute. Con el split de Mercado Pago <b>no se devuelve una parte de un pago</b>: para un resultado intermedio se compensa en las etapas que faltan pagar (${sp.n ? `quedan ${sp.n}, por ${A.money(sp.neto)} para el prestador` : 'no queda ninguna'}). Al confirmar se notifica a ambas partes por email.</p>
         <label class="flex items-start gap-2 text-xs mb-4 cursor-pointer border border-dashed border-amber-600 bg-amber-50/70 p-2"><input type="checkbox" class="w-4 h-4 mt-0.5 accent-[#b45309]" data-action="dict-sinsaldo" data-s="${s.id}" ${f.sinSaldo ? 'checked' : ''}>
-          <span><b>Demo:</b> simular que el prestador no tiene saldo en Mercado Pago. El reembolso falla, OficiosYa le reintegra al cliente con su fondo de garantía y el monto queda como deuda del prestador (se recupera de sus próximos cobros).</span></label>
-        <div class="mb-4"><label class="lbl">Fundamento del dictamen (opcional)</label><textarea rows="2" class="inp" data-model="dict.${s.id}.nota" placeholder="Ej. La mano de obra principal fue ejecutada (70%) pero requiere re-ajuste de unión.">${esc(f.nota)}</textarea></div>
-        <div class="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
-          <div class="border-2 border-primary-container p-4 flex flex-col">
-            <div class="font-head font-bold text-primary text-sm uppercase">${A.icon('handyman', '!text-base')} Recomendado primero</div>
-            <div class="font-head font-semibold">Corregir la etapa</div>
-            <p class="text-xs text-on-surface-variant my-2">El prestador corrige la etapa sin costo dentro del plazo. Si no la marca como terminada a tiempo, se reembolsa automáticamente el pago de la etapa.</p>
-            <label class="lbl">Plazo (días)</label><input type="number" min="1" max="30" class="inp" data-model="dict.${s.id}.plazo" value="${esc(f.plazo)}">
-            <button class="btn-primary btn-sm mt-auto w-full !mt-3" data-action="resolver" data-tipo="corregir" data-s="${s.id}">Ordenar corrección</button>
-          </div>
-          <div class="border border-outline-variant p-4 flex flex-col">
-            <div class="font-head font-bold text-primary-container text-sm uppercase">${A.icon('call_split', '!text-base')} Trabajo incompleto / parcial</div>
-            <div class="font-head font-semibold">Reembolso parcial</div>
-            <p class="text-xs text-on-surface-variant my-2">Devuelve una parte del pago de la etapa en curso; el resto queda para el prestador.</p>
-            <label class="lbl">Devolver al cliente (ARS)</label>
-            <label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" max="${enJ - 1}" step="500" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="dict.${s.id}.reembolso" data-live="dict" value="${esc(f.reembolso)}"></label>
-            <div class="text-xs mt-2 space-y-0.5" id="dict-parc">${parcHtml(parc)}</div>
-            <button class="btn-primary btn-sm mt-auto w-full !mt-3" data-action="resolver" data-tipo="parcial" data-s="${s.id}">Ejecutar reembolso parcial</button>
-          </div>
-          <div class="border border-outline-variant p-4 flex flex-col">
-            <div class="font-head font-bold text-red-600 text-sm uppercase">${A.icon('undo', '!text-base')} Trabajo mal hecho / incumplido</div>
-            <div class="font-head font-semibold">Reembolso total de la etapa</div>
-            <p class="text-xs text-on-surface-variant my-2">Arbitraje a favor del cliente: se devuelve todo el pago de la etapa en curso.</p>
-            <div class="bg-surface-container-low p-2 text-center mt-auto"><div class="lbl !mb-0">Reintegro a tarjeta / saldo MP</div><div class="money text-red-600 text-xl">${A.money(enJ)}</div></div>
-            <button class="btn-danger btn-sm !bg-red-600 !text-white w-full mt-3" data-action="resolver" data-tipo="total" data-s="${s.id}">Devolver 100% de la etapa</button>
-          </div>
-          <div class="border border-outline-variant p-4 flex flex-col">
-            <div class="font-head font-bold text-tertiary text-sm uppercase">${A.icon('verified', '!text-base')} Cliente malintencionado</div>
-            <div class="font-head font-semibold">A favor del prestador</div>
-            <p class="text-xs text-on-surface-variant my-2">Si el servicio fue brindado (evidencias y etapas aprobadas), no hay reembolso: el pago de la etapa queda para el prestador y el trabajo se cierra.</p>
-            <div class="bg-surface-container-low p-2 text-center mt-auto"><div class="lbl !mb-0">Queda para el prestador</div><div class="money text-tertiary text-xl">${A.money(prestEnJ)}</div></div>
-            <button class="btn-success btn-sm w-full mt-3" data-action="resolver" data-tipo="forzosa" data-s="${s.id}">Resolver a favor del prestador</button>
-          </div>
+          <span><b>Demo:</b> simular que el prestador no tiene saldo en Mercado Pago. El reembolso queda <b>pendiente</b> (no hay fondo de garantía), el prestador queda suspendido hasta que se ejecute y se reintenta cuando tenga saldo.</span></label>
+        <div class="mb-4"><label class="lbl">Fundamento del dictamen (opcional)</label><textarea rows="2" class="inp" data-model="dict.${s.id}.nota" placeholder="Ej. La mano de obra principal fue ejecutada pero requiere re-ajuste de unión.">${esc(f.nota)}</textarea></div>
+        <div class="grid md:grid-cols-2 xl:grid-cols-3 gap-3">
+          ${card(`${A.icon('handyman', '!text-base')} Recomendado primero`, 'Corregir la etapa', 'El prestador corrige la etapa sin costo dentro del plazo. Si no la marca como terminada a tiempo, se reembolsa automáticamente el total del pago de la etapa.',
+            `<label class="lbl">Plazo (días)</label><input type="number" min="1" max="30" class="inp" data-model="dict.${s.id}.plazo" value="${esc(f.plazo)}">`,
+            `<button class="btn-primary btn-sm mt-auto w-full !mt-3" data-action="resolver" data-tipo="corregir" data-s="${s.id}">Ordenar corrección</button>`, 'border-2 border-primary-container')}
+          ${card(`${A.icon('call_split', '!text-base')} Trabajo incompleto`, 'Compensar en las etapas sin pagar', 'La etapa se da por cumplida y el cliente paga menos en las etapas que faltan. Sin movimiento de dinero.',
+            `<label class="lbl">Descuento (lo que no se hizo, en pesos del prestador)</label>${montoInp('compensar', 'Máx. ' + A.money(Math.min(sp.neto, sp.etapaEnCurso)))}`,
+            `<button class="btn-primary btn-sm mt-auto w-full !mt-3" data-action="resolver" data-tipo="compensar" data-s="${s.id}">Compensar</button>`, undefined, !sp.n)}
+          ${card(`${A.icon('undo', '!text-base')} Trabajo incompleto`, 'Reembolso total + recobro', 'Se reembolsa el total del pago de la etapa y lo que sí se hizo se cobra junto con la etapa siguiente.',
+            `<label class="lbl">Lo que sí se hizo (en pesos del prestador)</label>${montoInp('recobro', 'Menos de ' + A.money(sp.etapaEnCurso))}`,
+            `<button class="btn-primary btn-sm mt-auto w-full !mt-3" data-action="resolver" data-tipo="recobro" data-s="${s.id}">Reembolsar y recobrar</button>`, undefined, !sp.n)}
+          ${card(`${A.icon('undo', '!text-base')} Trabajo mal hecho`, 'Reembolso total de la etapa', 'Se devuelve el total del pago de la etapa en curso y se cancelan las etapas sin pagar.',
+            `<div class="bg-surface-container-low p-2 text-center mt-auto"><div class="lbl !mb-0">Reintegro a tarjeta / saldo MP</div><div class="money text-red-600 text-xl">${A.money(enJ)}</div></div>`,
+            `<button class="btn-danger btn-sm !bg-red-600 !text-white w-full mt-3" data-action="resolver" data-tipo="total" data-s="${s.id}">Devolver el total de la etapa</button>`)}
+          ${card(`${A.icon('verified', '!text-base')} Cliente malintencionado`, 'A favor del prestador', 'No hay reembolso: el pago de la etapa queda para el prestador y el trabajo se cierra. No hace falta cobrarle nada al cliente: la etapa se pagó antes de empezar.',
+            `<div class="bg-surface-container-low p-2 text-center mt-auto"><div class="lbl !mb-0">Queda para el prestador</div><div class="money text-tertiary text-xl">${A.money(prestEnJ)}</div></div>`,
+            `<button class="btn-success btn-sm w-full mt-3" data-action="resolver" data-tipo="forzosa" data-s="${s.id}">Resolver a favor del prestador</button>`)}
         </div></div>`;
     }
 
@@ -406,21 +398,6 @@
       ${comp}${dictamen}</div>`;
   }
 
-  /* Reembolso parcial sobre el pago de la etapa en curso: MP lo descuenta en proporción del prestador y de la comisión */
-  function calcParcial(s, reembolso) {
-    const pagos = A.pagosEnJuego(s); const enJ = A.enJuego(s);
-    const cli = pagos.reduce((a, p) => a + p.cliente, 0) || 1; const fee = pagos.reduce((a, p) => a + p.fee, 0);
-    const r = Math.max(0, Math.min(enJ, reembolso)); const com = Math.round((r * fee) / cli);
-    return { r, com, prest: r - com, queda: enJ - r };
-  }
-  const parcHtml = (c) => `<div class="flex justify-between"><span>Se descuenta al prestador</span><b class="font-head tnum">-${A.money(c.prest)}</b></div>
-    <div class="flex justify-between"><span>Se descuenta de la comisión</span><b class="font-head tnum">-${A.money(c.com)}</b></div>
-    <div class="flex justify-between"><span>Queda del pago de la etapa</span><b class="font-head tnum text-tertiary">${A.money(c.queda)}</b></div>`;
-  A.live.dict = () => {
-    const id = Object.keys(A.ui.dict || {}).find((k) => document.querySelector(`[data-model="dict.${k}.reembolso"]`));
-    if (!id) return; const s = A.sol(id);
-    const el = document.getElementById('dict-parc'); if (el) el.innerHTML = parcHtml(calcParcial(s, Number(A.ui.dict[id].reembolso) || 0));
-  };
   A.actions['dict-sinsaldo'] = (el) => { A.ui.dict[el.dataset.s].sinSaldo = !!el.checked; A.rerender(); };
 
   document.addEventListener('change', (ev) => {
@@ -438,22 +415,18 @@
     const s = A.sol(el.dataset.s); const tipo = el.dataset.tipo; const f = A.ui.dict[s.id];
     const enJ = A.enJuego(s); const ids = A.pagosEnJuego(s).map((p) => p.id).join(', ') || '—';
     let plan;
-    if (tipo === 'parcial') {
-      const c = calcParcial(s, Number(f.reembolso) || 0);
-      if (c.r <= 0 || c.r >= enJ) { A.toast('El reembolso parcial debe ser mayor a 0 y menor al pago de la etapa en curso.', 'err'); return; }
-      plan = A.planResolucion(s, 'parcial', { monto: c.r, nota: f.nota });
+    if (tipo === 'compensar' || tipo === 'recobro') {
+      const err = A.validarMontoResolucion(s, tipo, f[tipo]); if (err) { A.toast(err, 'err'); return; }
+      plan = A.planResolucion(s, tipo, { monto: Number(f[tipo]), nota: f.nota });
     } else if (tipo === 'corregir') {
       const pl = Number(f.plazo);
       if (!(pl >= 1 && pl <= 30 && Number.isInteger(pl))) { A.toast('Indicá un plazo de corrección de 1 a 30 días.', 'err'); return; }
       plan = A.planResolucion(s, 'corregir', { plazo: pl, nota: f.nota });
     } else plan = A.planResolucion(s, tipo, { nota: f.nota });
-    if (plan.reembolso && f.sinSaldo) {
-      const tope = A.cfg('topeGarantia', 100000);
-      plan.detalle += ` El reembolso fue rechazado por falta de saldo en la cuenta del prestador: OficiosYa le reintegró al cliente con su fondo de garantía${plan.reembolso > tope ? ` (hasta el tope de ${A.money(tope)} por caso; el resto queda pendiente de reintegro)` : ''} y registró la deuda al prestador.`;
-    }
+    if (plan.reembolso && f.sinSaldo) plan.detalle += ' Mercado Pago rechazó el reembolso por falta de saldo del prestador: queda pendiente, el prestador queda suspendido hasta que se ejecute y se reintenta cuando tenga saldo.';
     plan.api = plan.reembolso
-      ? `POST https://api.mercadopago.com/v1/payments/{id}/refunds   (pagos: ${ids})\n{ "amount": ${plan.reembolso} }${f.sinSaldo ? '\n→ error: saldo insuficiente en la cuenta del prestador\n→ reintegro con el fondo de garantía de OficiosYa + deuda al prestador' : ''}`
-      : tipo === 'corregir' ? `Sin movimiento de dinero ahora. Si la corrección no se termina en ${plan.plazo} días:\nPOST https://api.mercadopago.com/v1/payments/{id}/refunds   (pagos: ${ids})\n{ "amount": ${enJ} }` : 'Sin movimiento de dinero: el pago ya está en la cuenta del prestador';
+      ? `POST https://api.mercadopago.com/v1/payments/{id}/refunds   (pagos: ${ids}, reembolso total)${f.sinSaldo ? '\n→ error: saldo insuficiente en la cuenta del prestador\n→ reembolso pendiente + prestador suspendido hasta que se ejecute' : ''}`
+      : tipo === 'corregir' ? `Sin movimiento de dinero ahora. Si la corrección no se termina en ${plan.plazo} días:\nPOST https://api.mercadopago.com/v1/payments/{id}/refunds   (pagos: ${ids}, reembolso total)` : tipo === 'compensar' ? 'Sin movimiento de dinero: descuento en las etapas que faltan pagar' : 'Sin movimiento de dinero: el pago ya está en la cuenta del prestador';
     A.ui.pendingPlan = { id: s.id, plan, tipo };
     A.modal(`<div class="p-5 space-y-3">
       <div class="font-head font-bold text-lg flex items-center gap-2">${A.icon('gavel')} Confirmar dictamen — ${plan.titulo}</div>

@@ -115,8 +115,8 @@
     const fila = (k, v, cls = 'font-head tnum', dest = false) => `<div class="flex justify-between py-2 ${dest ? 'bg-surface-container-low px-2' : ''}"><span class="${dest ? 'font-head font-bold uppercase text-xs' : ''}">${k}</span><b class="${cls}">${A.money(v)}</b></div>`;
     const listaPagos = e.pagos.length ? `<div class="border border-outline-variant/60 divide-y divide-outline-variant/50 text-xs mb-3">${e.pagos.map((p) => `<div class="p-2 flex justify-between gap-3">
         <div class="min-w-0"><div class="font-semibold">${esc(p.concepto)}</div><div class="text-on-surface-variant font-head">${esc(p.id)} · ${esc(p.fecha)}${p.reembolsado ? ` · <span class="text-red-600">reembolsado ${A.money(p.reembolsado)}</span>` : ''}</div>
-          ${staff ? `<div class="text-on-surface-variant">Prestador ${A.money(p.recibe)} · costo MP ${A.money(p.mpFee)} · application_fee ${A.money(p.fee)}${p.recupero ? ` (incluye recupero de deuda ${A.money(p.recupero)})` : ''}</div>` : ''}
-          ${esPrest && p.recupero ? `<div class="text-amber-700">Se descontaron ${A.money(p.recupero)} de tu deuda con OficiosYa</div>` : ''}</div>
+          ${staff ? `<div class="text-on-surface-variant">Prestador ${A.money(p.recibe)} · costo MP ${A.money(p.mpFee)} · application_fee ${A.money(p.fee)}</div>` : ''}
+          ${p.pendienteReembolso ? `<div class="text-red-600 font-semibold">Reembolso pendiente: Mercado Pago lo rechazó por falta de saldo del prestador</div>` : ''}</div>
         <b class="font-head tnum whitespace-nowrap">${A.money(esPrest ? p.recibe : p.cliente)}</b></div>`).join('')}</div>` : '';
     const estadoPagos = { activo: 'Pago por etapa', liquidado: 'Liquidado', resuelto: 'Resuelto por arbitraje', cancelado: 'Rescindido' }[e.estado] || e.estado;
     const fid = `<div class="card card-pad">
@@ -125,15 +125,16 @@
       <div class="text-sm divide-y divide-outline-variant/50">
         ${esPrest
           ? fila('Tu presupuesto de mano de obra', e.neto) + fila('Cobrado en tu cuenta de Mercado Pago', e.liberadoPrestador, 'money text-tertiary text-lg', true)
-            + (pp.n ? fila(`Por cobrar (${pp.n} etapa${pp.n === 1 ? '' : 's'} sin pagar)`, pp.neto) : '') + (pr.deuda ? fila('Deuda con OficiosYa (se descuenta de tus próximos cobros)', pr.deuda, 'font-head tnum text-red-600') : '')
+            + (pp.n ? fila(`Por cobrar (${pp.n} etapa${pp.n === 1 ? '' : 's'} sin pagar)`, pp.neto) : '') 
           : staff
             ? fila('Cobrado a clientes', e.cobrado) + fila('Recibido por el prestador', e.liberadoPrestador) + fila(`Costo de Mercado Pago (${A.pct(A.costoMP(e))} estimado)`, e.costoMPTotal || 0)
               + fila(`Comisión OficiosYa · application_fee (${A.pct(t)} etapas · ${A.pct(A.tasa(e, 'materiales'))} materiales)`, e.comisionCobrada || 0) + (e.reembolsado ? fila('Reembolsado al cliente', e.reembolsado, 'font-head tnum text-red-600') : '')
-              + (e.garantia ? fila('Reintegrado con el fondo de garantía', e.garantia, 'font-head tnum text-red-600') : '') + (pp.n ? fila('Falta cobrar al cliente', pp.cliente) : '')
+ + (pp.n ? fila('Falta cobrar al cliente', pp.cliente) : '')
             : fila('Precio del trabajo (mano de obra)', e.total) + fila('Pagado', e.cobrado, 'money text-primary text-lg', true)
               + (e.reembolsado ? fila('Reembolsado', e.reembolsado, 'font-head tnum text-red-600') : '') + (pp.n ? fila(`Falta pagar (${pp.n} etapa${pp.n === 1 ? '' : 's'})`, pp.cliente) : '')}
       </div>
       ${!staff ? `<div class="mt-2">${A.demoNota(`Cada pago es un split: el cliente pagó ${A.money(e.cobrado)}; Mercado Pago descontó ${A.money(e.costoMPTotal || 0)} de costo de procesamiento, el prestador recibió ${A.money(e.liberadoPrestador)} y OficiosYa ${A.money(e.comisionCobrada || 0)} (application_fee: su comisión completa, ${A.pct(t)} en etapas y ${A.pct(A.tasa(e, 'materiales'))} en materiales). El cliente paga la comisión y el costo de MP. Ninguna de las partes ve este desglose.`)}</div>` : ''}
+      ${(() => { const pend = A.pendientesDe((x) => x.solId === s.id); return pend.length ? `<div class="mt-3 bg-red-50 border border-red-500 p-3 text-xs space-y-2">${pend.map((x) => `<div><b>Reembolso pendiente de ${A.money(x.monto)}</b> (${esc(x.concepto)}): Mercado Pago lo rechazó porque el prestador no tiene saldo. Se reintenta cuando tenga saldo y, mientras tanto, el prestador queda suspendido. ${rol === 'cliente' ? 'También podés reclamar directamente en Mercado Pago.' : ''}</div>${staff ? `<button class="btn-ghost btn-sm" data-action="rp-reintentar" data-r="${x.id}">Demo: el prestador ya tiene saldo · reintentar</button>` : ''}`).join('')}</div>` : ''; })()}
       <p class="text-[11px] text-on-surface-variant mt-2">* Cada pago se crea a nombre del prestador (split 1:1 de Mercado Pago) y se acredita en su cuenta en el momento. OficiosYa no retiene dinero: si hay un reembolso, Mercado Pago lo descuenta de los pagos ya acreditados.</p></div>`;
 
     return head + `<div class="max-w-[1400px] mx-auto px-4 md:px-8 py-6 grid lg:grid-cols-[1fr_440px] gap-6">
@@ -194,8 +195,8 @@
   }
 
   /* --- Tarjeta de disputa: mediación entre las partes y, si no hay acuerdo, arbitraje --- */
-  const TIPOS_PROP = { corregir: 'Corregir la etapa sin costo', parcial: 'Reembolso parcial', total: 'Reembolso total de la etapa', forzosa: 'Sin reembolso (el pago queda para el prestador)' };
-  const textoProp = (p) => (p.tipo === 'corregir' ? `Corregir la etapa en ${p.plazo} días` : p.tipo === 'parcial' ? `Reembolso parcial de ${A.money(p.monto)}` : TIPOS_PROP[p.tipo]);
+  const TIPOS_PROP = { corregir: 'Corregir la etapa sin costo', compensar: 'Compensar: descuento en las etapas sin pagar', recobro: 'Reembolso total + recobro de lo hecho en la etapa siguiente', total: 'Reembolso total de la etapa', forzosa: 'Sin reembolso (el pago queda para el prestador)' };
+  const textoProp = (p) => (p.tipo === 'corregir' ? `Corregir la etapa en ${p.plazo} días` : p.tipo === 'compensar' ? `Compensar ${A.money(p.monto)} en las etapas sin pagar` : p.tipo === 'recobro' ? `Reembolso total + recobro de ${A.money(p.monto)}` : TIPOS_PROP[p.tipo]);
   function disputaCard(s, rol) {
     if (rol !== 'cliente' && rol !== 'prestador') {
       return s.disputa ? `<a href="#/arbitraje/${s.id}" class="btn-dark w-full">${A.icon('gavel')} Abrir caso ${s.disputa.id} en arbitraje</a>` : '';
@@ -238,9 +239,10 @@
       const enJ = A.enJuego(s);
       const form = med && fp ? `<div class="border border-primary-container p-3 space-y-2">
           <div class="font-head text-xs font-bold uppercase">Proponer un acuerdo</div>
-          <select class="inp" data-model="prop.${s.id}.tipo" data-rerender>${Object.entries(TIPOS_PROP).map(([k, t]) => `<option value="${k}" ${fp.tipo === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <select class="inp" data-model="prop.${s.id}.tipo" data-rerender>${Object.entries(TIPOS_PROP).filter(([k]) => (k !== 'compensar' && k !== 'recobro') || A.sinPagarInfo(s).n).map(([k, t]) => `<option value="${k}" ${fp.tipo === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          ${!A.sinPagarInfo(s).n ? '<p class="text-[11px] text-on-surface-variant">No quedan etapas sin pagar: con Mercado Pago no se puede devolver una parte de un pago, así que las opciones son corregir, reembolsar el total de la etapa o resolver sin reembolso.</p>' : ''}
           ${fp.tipo === 'corregir' ? `<label class="flex items-center gap-2 text-sm">Plazo para corregir <input type="number" min="1" max="30" class="inp w-20" data-model="prop.${s.id}.plazo" value="${esc(fp.plazo)}"> días</label>` : ''}
-          ${fp.tipo === 'parcial' ? `<label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" max="${enJ - 1}" step="500" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="prop.${s.id}.monto" value="${esc(fp.monto)}" placeholder="Monto a reembolsar (máx. ${A.money(enJ - 1)})"></label>` : ''}
+          ${fp.tipo === 'compensar' || fp.tipo === 'recobro' ? `<label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" max="${enJ - 1}" step="500" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="prop.${s.id}.monto" value="${esc(fp.monto)}" placeholder="${fp.tipo === 'compensar' ? 'Descuento para el cliente (lo que no se hizo)' : 'Lo que sí se hizo (para el prestador)'}"></label>` : ''}
           <textarea rows="2" class="inp" data-model="prop.${s.id}.nota" placeholder="Detalle de la propuesta (qué se corrige, cuándo, etc.)">${esc(fp.nota || '')}</textarea>
           <div class="flex gap-2"><button class="btn-ghost btn-sm flex-1" data-action="med-prop-cancel" data-s="${s.id}">Cancelar</button><button class="btn-primary btn-sm flex-1" data-action="med-prop-submit" data-s="${s.id}">Enviar propuesta</button></div></div>` : '';
       return `<div class="card border-2 border-red-500 p-4 md:p-5 space-y-3">
@@ -273,13 +275,13 @@
     const enPlazo = dias <= plazo;
     const ultimoPago = s.escrow.pagos.length ? s.escrow.pagos[s.escrow.pagos.length - 1] : null;
     const reembolsable = ultimoPago && A.diasDesde(ultimoPago.fecha) <= 180;
-    const maxReemb = s.escrow.pagos.filter((p) => p.ref === 'ajuste' || (p.ref || '').indexOf('etapa:') === 0).reduce((a, p) => a + p.cliente - p.reembolsado, 0);
+    const ultEtapa = s.escrow.pagos.filter((p) => (p.ref || '').indexOf('etapa:') === 0 && p.cliente - p.reembolsado > 0).slice(-1)[0];
     const box = (inner, color = 'border-amber-600') => `<div class="card border-2 ${color} p-4 md:p-5 space-y-3"><div class="font-head font-bold flex items-center gap-2">${A.icon('shield', 'text-amber-700')} Reclamo por garantía</div>${inner}</div>`;
     if (!r) {
       if (rol !== 'cliente') return '';
       if (!enPlazo) return `<div class="card p-4 text-xs text-on-surface-variant">${A.icon('shield', '!text-base')} El plazo para reclamos por garantía (${plazo} días desde el cierre) ya venció.</div>`;
       const f = (A.ui.rec = A.ui.rec || {})[s.id];
-      if (!f) return box(`<p class="text-xs text-on-surface-variant">¿Apareció una falla después de terminado el trabajo? Tenés <b>${plazo - dias} días</b> más para reclamar. Primero se busca que el prestador lo corrija; un reembolso solo se hace si los dos están de acuerdo.</p>
+      if (!f) return box(`<p class="text-xs text-on-surface-variant">¿Apareció una falla después de terminado el trabajo? Tenés <b>${plazo - dias} días</b> más para reclamar. Primero se busca que el prestador lo corrija; un reembolso (del total de la última etapa) solo se hace si los dos están de acuerdo.</p>
         <button class="btn-ghost w-full" data-action="rec-open" data-s="${s.id}">${A.icon('report')} Iniciar reclamo por garantía</button>`, 'border-outline-variant');
       return box(`<textarea rows="3" class="inp" data-model="rec.${s.id}.texto" placeholder="Qué falla apareció y desde cuándo">${esc(f.texto)}</textarea>
         ${A.uploader('rec.' + s.id + '.fotos', 'resena', 'Adjuntar fotos')}${f.fotos.length ? A.gallery(f.fotos, { removable: 'remove-photo" data-target="rec.' + s.id + '.fotos', cols: 'grid-cols-4', label: 'FOTO' }) : ''}
@@ -289,11 +291,11 @@
     const fo = (A.ui.recOf = A.ui.recOf || {})[s.id];
     let acciones = '';
     if (rol === 'prestador' && r.estado === 'abierto') {
-      acciones = fo ? `<div class="space-y-2">${fo.modo === 'reembolso' ? `<label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" max="${maxReemb}" step="500" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="recOf.${s.id}.monto" value="${esc(fo.monto)}" placeholder="Monto a reembolsar"></label>` : ''}
+      acciones = fo ? `<div class="space-y-2">${fo.modo === 'reembolso' && ultEtapa ? `<div class="text-xs bg-surface-container-low border border-outline-variant/60 p-2">Se reembolsa el <b>total del pago de la última etapa</b> (${A.money(ultEtapa.cliente - ultEtapa.reembolsado)}): con Mercado Pago no se puede devolver una parte de un pago.</div>` : ''}
           <textarea rows="2" class="inp" data-model="recOf.${s.id}.texto" placeholder="${fo.modo === 'corregir' ? 'Cuándo pasás a corregirlo' : fo.modo === 'reembolso' ? 'Motivo del reembolso' : 'Por qué no corresponde la garantía'}">${esc(fo.texto)}</textarea>
           <div class="flex gap-2"><button class="btn-ghost btn-sm flex-1" data-action="rec-of-cancel" data-s="${s.id}">Volver</button><button class="btn-primary btn-sm flex-1" data-action="rec-responder" data-s="${s.id}">Enviar respuesta</button></div></div>`
         : `<div class="flex flex-col gap-2"><button class="btn-success btn-sm" data-action="rec-modo" data-s="${s.id}" data-v="corregir">${A.icon('handyman')} Acepto corregirlo</button>
-          ${reembolsable ? `<button class="btn-ghost btn-sm" data-action="rec-modo" data-s="${s.id}" data-v="reembolso">${A.icon('undo')} Ofrecer un reembolso</button>` : '<div class="text-[11px] text-on-surface-variant">No se puede ofrecer reembolso: pasaron más de 180 días desde el último pago (límite de Mercado Pago).</div>'}
+          ${reembolsable && ultEtapa ? `<button class="btn-ghost btn-sm" data-action="rec-modo" data-s="${s.id}" data-v="reembolso">${A.icon('undo')} Ofrecer el reembolso total de la última etapa</button>` : '<div class="text-[11px] text-on-surface-variant">No se puede ofrecer reembolso: pasaron más de 180 días desde el último pago (límite de Mercado Pago).</div>'}
           <button class="btn-ghost btn-sm" data-action="rec-modo" data-s="${s.id}" data-v="rechazar">Rechazar el reclamo</button></div>`;
     }
     if (rol === 'cliente' && r.estado === 'en_correccion') acciones = `<div class="flex gap-2"><button class="btn-ghost btn-sm flex-1" data-action="rec-cerrar" data-s="${s.id}" data-v="no_resuelto">No quedó resuelto</button><button class="btn-success btn-sm flex-1" data-action="rec-cerrar" data-s="${s.id}" data-v="resuelto">Quedó resuelto</button></div>`;
@@ -327,42 +329,56 @@
   }
 
 
-  /* =================== COMPRAS DE MATERIALES (monto + foto del ticket; el cliente paga cada ticket aprobado) =================== */
+  /* =================== COMPRAS DE MATERIALES: se pagan ANTES de comprar =================== */
+  /* Con el split no se le puede cobrar al cliente después: el prestador pide el pago de cada compra con el monto
+     presupuestado en el comercio, el cliente lo paga y recién ahí compra y sube el ticket. Si el ticket sale más barato,
+     la diferencia es un crédito para el cliente en la etapa siguiente (no hay reembolsos parciales); si sale más caro,
+     el prestador pide un pago complementario antes de comprar lo que falta. */
   function comprasCard(s, rol) {
     const p = A.postAceptada(s); const e = s.escrow;
     const est = p.incluyeMateriales ? Number(p.costoMateriales) || 0 : 0;
     const compras = s.compras || [];
-    const sum = (f) => compras.filter(f).reduce((a, c) => a + c.monto, 0);
-    const declarado = sum(() => true); const pagado = sum((c) => c.estado === 'pagada');
+    const pagado = compras.filter((c) => c.estado === 'pagada' || c.estado === 'rendida').reduce((a, c) => a + c.monto, 0);
+    const rendido = compras.filter((c) => c.estado === 'rendida').reduce((a, c) => a + (c.montoReal || 0), 0);
     const activo = s.estado === 'en_curso';
     if (!compras.length && !p.incluyeMateriales && !(rol === 'prestador' && activo)) return '';
-    const chip = { pendiente: '<span class="chip-amber">Pendiente de aprobación</span>', aprobada: '<span class="chip-blue">Aprobada · falta pagar</span>', pagada: '<span class="chip-green">Pagada al prestador</span>', observada: '<span class="chip-red">Observada</span>' };
-    const f = ((A.ui.compra = A.ui.compra || {})[s.id] = A.ui.compra[s.id] || { detalle: '', monto: '', foto: [] });
+    const chip = { solicitada: '<span class="chip-amber">Pago pedido al cliente</span>', pagada: '<span class="chip-blue">Pagada · falta el ticket</span>', rendida: '<span class="chip-green">Comprada con ticket</span>', observada: '<span class="chip-red">Observada por el cliente</span>' };
+    const f = ((A.ui.compra = A.ui.compra || {})[s.id] = A.ui.compra[s.id] || { detalle: '', monto: '' });
+    const tk = (A.ui.ticket = A.ui.ticket || {});
     return `<div class="card card-pad">
-      <div class="flex flex-wrap justify-between items-center gap-2 mb-2"><div class="sec-title">${A.icon('receipt_long')} Compras de materiales e insumos</div><span class="chip-gray">${compras.length} ticket(s)</span></div>
-      <p class="text-xs text-on-surface-variant mb-3">El prestador compra los materiales, declara el monto real y adjunta la foto del ticket. Cuando el cliente lo aprueba, <b>paga ese ticket</b> y el pago se acredita al prestador en el momento, para que no financie los materiales. Se paga el monto del ticket más los cargos del servicio y del medio de pago.</p>
+      <div class="flex flex-wrap justify-between items-center gap-2 mb-2"><div class="sec-title">${A.icon('receipt_long')} Compras de materiales e insumos</div><span class="chip-gray">${compras.length} compra(s)</span></div>
+      <p class="text-xs text-on-surface-variant mb-3">Los materiales se pagan <b>antes de comprarlos</b>: el prestador pide el pago con el monto presupuestado en el comercio, el cliente lo paga (se acredita al prestador) y recién ahí compra y sube el ticket. Si el ticket sale más barato, la diferencia se descuenta de la etapa siguiente; si sale más caro, el prestador pide un pago complementario antes de comprar lo que falta.</p>
       <div class="grid grid-cols-3 gap-2 mb-3 text-center">
         <div class="bg-surface-container-low border border-outline-variant/60 p-2"><div class="lbl !mb-0 !text-[9px]">Estimado en presupuesto</div><div class="money">${A.money(est)}</div></div>
-        <div class="bg-surface-container-low border border-outline-variant/60 p-2"><div class="lbl !mb-0 !text-[9px]">Declarado con ticket</div><div class="money">${A.money(declarado)}</div></div>
-        <div class="bg-surface-container-low border border-outline-variant/60 p-2"><div class="lbl !mb-0 !text-[9px]">Pagado al prestador</div><div class="money text-tertiary">${A.money(pagado)}</div></div>
+        <div class="bg-surface-container-low border border-outline-variant/60 p-2"><div class="lbl !mb-0 !text-[9px]">Pagado para comprar</div><div class="money">${A.money(pagado)}</div></div>
+        <div class="bg-surface-container-low border border-outline-variant/60 p-2"><div class="lbl !mb-0 !text-[9px]">Rendido con ticket</div><div class="money text-tertiary">${A.money(rendido)}</div></div>
       </div>
-      ${compras.length ? `<div class="divide-y divide-outline-variant/50 border-y border-outline-variant/50">${compras.map((c) => `<div class="py-3 flex gap-3 items-start">
-          <button class="w-16 h-16 shrink-0 border border-slate-950/70 bg-white overflow-hidden" data-action="zoom" data-src="${c.foto}" title="Ver ticket"><img src="${c.foto}" alt="Ticket" class="w-full h-full object-cover"></button>
+      ${compras.length ? `<div class="divide-y divide-outline-variant/50 border-y border-outline-variant/50">${compras.map((c) => {
+        const t = (tk[c.id] = tk[c.id] || { monto: '', foto: [] });
+        return `<div class="py-3 flex gap-3 items-start">
+          ${c.foto ? `<button class="w-16 h-16 shrink-0 border border-slate-950/70 bg-white overflow-hidden" data-action="zoom" data-src="${c.foto}" title="Ver ticket"><img src="${c.foto}" alt="Ticket" class="w-full h-full object-cover"></button>` : `<div class="w-16 h-16 shrink-0 border border-dashed border-outline-variant flex items-center justify-center text-outline">${A.icon('receipt_long')}</div>`}
           <div class="flex-1 min-w-0"><div class="flex justify-between gap-2"><span class="text-sm font-semibold">${esc(c.detalle)}</span><span class="money whitespace-nowrap">${A.money(c.monto)}</span></div>
-            <div class="flex flex-wrap gap-2 items-center mt-1">${chip[c.estado] || ''}<span class="text-[11px] text-on-surface-variant">${esc(c.fecha)}</span></div>
-            ${rol === 'cliente' && activo && c.estado === 'pendiente' ? `<div class="flex gap-2 mt-2"><button class="btn-success btn-sm" data-action="compra-estado" data-s="${s.id}" data-c="${c.id}" data-v="aprobada">${A.icon('check')} Aprobar y pagar</button><button class="btn-ghost btn-sm" data-action="compra-estado" data-s="${s.id}" data-c="${c.id}" data-v="observada">Observar</button></div>` : ''}
-            ${rol === 'cliente' && activo && c.estado === 'aprobada' ? `<button class="btn-primary btn-sm mt-2" data-action="compra-pagar" data-s="${s.id}" data-c="${c.id}">${A.icon('account_balance')} Pagar ticket · ${A.money(A.precio(e, c.monto, 'materiales'))}</button>` : ''}
-            ${rol === 'prestador' && c.estado === 'aprobada' ? '<div class="text-[11px] text-amber-700 mt-1">Aprobada: esperando que el cliente la pague.</div>' : ''}
-          </div></div>`).join('')}</div>` : ''}
+            <div class="flex flex-wrap gap-2 items-center mt-1">${chip[c.estado] || ''}<span class="text-[11px] text-on-surface-variant">${esc(c.fecha)}</span>${c.complementoDe ? `<span class="text-[11px] text-on-surface-variant">complemento de ${esc(c.complementoDe)}</span>` : ''}</div>
+            ${c.estado === 'rendida' ? `<div class="text-[11px] mt-1">Ticket: <b>${A.money(c.montoReal)}</b>${c.credito ? ` · <span class="text-tertiary">crédito de ${A.money(c.credito)} para el cliente ${c.creditoAplicado ? 'descontado de la etapa siguiente' : 'sin aplicar (no quedan etapas sin pagar)'}</span>` : ''}${c.faltante ? ` · <span class="text-amber-700">faltaron ${A.money(c.faltante)}</span>` : ''}</div>` : ''}
+            ${rol === 'cliente' && activo && c.estado === 'solicitada' ? `<div class="flex gap-2 mt-2"><button class="btn-success btn-sm" data-action="compra-pagar" data-s="${s.id}" data-c="${c.id}">${A.icon('check')} Aprobar y pagar ${A.money(A.precio(e, c.monto, 'materiales'))}</button><button class="btn-ghost btn-sm" data-action="compra-observar" data-s="${s.id}" data-c="${c.id}">Observar</button></div>` : ''}
+            ${rol === 'prestador' && c.estado === 'solicitada' ? '<div class="text-[11px] text-amber-700 mt-1">Esperando que el cliente pague esta compra. No compres hasta ver el pago acreditado.</div>' : ''}
+            ${rol === 'prestador' && activo && c.estado === 'pagada' ? `<div class="mt-2 space-y-2 border border-outline-variant p-2">
+                <div class="text-xs">Ya tenés el pago en tu cuenta: hacé la compra y subí el ticket con el monto real.</div>
+                <label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" step="100" class="w-full py-1.5 pr-2 outline-none font-head font-semibold tnum" data-model="ticket.${c.id}.monto" value="${esc(t.monto)}" placeholder="Monto real del ticket"></label>
+                ${A.uploader('ticket.' + c.id + '.foto', 'ticket', 'Foto del ticket (obligatoria)')}
+                ${t.foto.length ? A.gallery(t.foto, { removable: 'remove-photo" data-target="ticket.' + c.id + '.foto', label: 'TICKET', cols: 'grid-cols-3' }) : ''}
+                <button class="btn-primary btn-sm" data-action="compra-ticket" data-s="${s.id}" data-c="${c.id}">${A.icon('cloud_upload')} Subir ticket</button></div>` : ''}
+            ${rol === 'prestador' && activo && c.estado === 'rendida' && c.faltante && !c.complementoPedido ? `<button class="btn-ghost btn-sm mt-2" data-action="compra-complemento" data-s="${s.id}" data-c="${c.id}">${A.icon('add')} Pedir pago complementario de ${A.money(c.faltante)}</button>` : ''}
+          </div></div>`;
+      }).join('')}</div>` : ''}
       ${rol === 'prestador' && activo ? `<div class="mt-4 border-t border-outline-variant/60 pt-4 space-y-3">
-        <div class="font-head text-xs font-bold uppercase">Declarar una compra</div>
-        <div class="grid sm:grid-cols-[1fr_140px] gap-2">
-          <input class="inp" data-model="compra.${s.id}.detalle" value="${esc(f.detalle)}" placeholder="Qué compraste (ej. 25 m de cable 4 mm)">
+        <div class="font-head text-xs font-bold uppercase">Pedir el pago de una compra</div>
+        <div class="grid sm:grid-cols-[1fr_160px] gap-2">
+          <input class="inp" data-model="compra.${s.id}.detalle" value="${esc(f.detalle)}" placeholder="Qué vas a comprar (ej. 25 m de cable 4 mm)">
           <label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="0" step="100" class="w-full py-2 pr-2 outline-none font-head font-semibold text-right tnum" data-model="compra.${s.id}.monto" value="${esc(f.monto)}" placeholder="Monto"></label>
         </div>
-        ${A.uploader('compra.' + s.id + '.foto', 'ticket', 'Foto del ticket (obligatoria)')}
-        ${f.foto.length ? A.gallery(f.foto, { removable: 'remove-photo" data-target="compra.' + s.id + '.foto', label: 'TICKET', cols: 'grid-cols-3' }) : ''}
-        <button class="btn-primary btn-sm" data-action="compra-add" data-s="${s.id}">${A.icon('add')} Declarar compra</button>
+        <p class="text-[11px] text-on-surface-variant">Usá el precio que te pasó el comercio. El cliente paga antes de que compres.</p>
+        <button class="btn-primary btn-sm" data-action="compra-add" data-s="${s.id}">${A.icon('send')} Pedir pago al cliente</button>
       </div>` : ''}
     </div>`;
   }
@@ -379,7 +395,7 @@
     const f = (A.ui.ajuste = A.ui.ajuste || {})[s.id];
     const box = (inner, color = 'border-amber-600') => `<div class="card border-2 ${color} p-4 md:p-5 space-y-3"><div class="font-head font-bold flex items-center gap-2">${A.icon('price_change', 'text-amber-700')} Ajuste de precio del presupuesto</div>${inner}</div>`;
     if (f) {
-      return box(`<p class="text-xs text-on-surface-variant">Proponé un nuevo total. Si ${otro} acepta, la diferencia se aplica a las etapas que faltan pagar. Si ya están todas pagadas, se cobra o se reembolsa la diferencia en el momento. Si lo rechaza, cualquiera de los dos puede rechazar el trabajo.</p>
+      return box(`<p class="text-xs text-on-surface-variant">Proponé un nuevo total. Si ${otro} acepta, la diferencia se aplica a las etapas que faltan pagar. Si ya están todas pagadas, un aumento se paga antes de hacer el trabajo extra; una rebaja no es posible (Mercado Pago no devuelve una parte de un pago). Si lo rechaza, cualquiera de los dos puede rechazar el trabajo.</p>
         <div class="flex justify-between text-sm"><span>${esP ? 'Tu total actual a cobrar' : 'Total actual del trabajo'}</span><b class="money">${A.money(actualRol)}</b></div>
         <div><label class="lbl">${esP ? 'Nuevo total que cobrarías' : 'Nuevo total del trabajo'}</label><label class="flex items-center bg-white border border-slate-400"><span class="px-2 font-head">$</span><input type="number" min="1" step="500" class="w-full py-2 pr-2 outline-none font-head font-semibold tnum" data-model="ajuste.${s.id}.monto" value="${esc(f.monto)}"></label></div>
         <div><label class="lbl">Motivo</label><textarea rows="3" class="inp" data-model="ajuste.${s.id}.motivo" placeholder="Ej. Al desarmar apareció un segundo tramo dañado que no estaba a la vista.">${esc(f.motivo)}</textarea></div>
@@ -393,7 +409,7 @@
           : `<div class="flex gap-2"><button class="btn-ghost flex-1" data-action="aj-rechazar" data-s="${s.id}">Rechazar</button><button class="btn-success flex-1" data-action="aj-aceptar" data-s="${s.id}">Aceptar ajuste</button></div>`}`);
     }
     if (a && a.estado === 'pago_pendiente') {
-      return box(`<div class="text-sm">Ajuste aceptado: el total pasa a <b>${A.money(vp)}</b>. Como todas las etapas ya están pagadas, la diferencia se paga ahora.</div>
+      return box(`<div class="text-sm">Ajuste aceptado: el total pasa a <b>${A.money(vp)}</b>. Como todas las etapas ya están pagadas, la diferencia se paga ahora y <b>el trabajo extra se hace después del pago</b>.</div>
         ${rol === 'cliente' ? `<button class="btn-primary w-full" data-action="aj-pagar" data-s="${s.id}">${A.icon('account_balance')} Pagar diferencia de ${A.money(a.difCliente)}</button>` : `<div class="text-xs text-on-surface-variant">Esperando que el cliente pague la diferencia (cobrás ${A.money(a.difNeto)}).</div>`}`);
     }
     if (a && a.estado === 'rechazado') {
@@ -444,38 +460,60 @@
     </div>`;
   }
 
-  /* ---------- Acciones: compras ---------- */
+  /* ---------- Acciones: compras (pago antes de comprar) ---------- */
   A.actions['compra-add'] = (el) => {
     const s = A.sol(el.dataset.s); const f = A.ui.compra[s.id];
-    if (!f.detalle || f.detalle.trim().length < 3) { A.toast('Indicá qué compraste.', 'err'); return; }
-    if (!(Number(f.monto) > 0)) { A.toast('Declará el monto de la compra.', 'err'); return; }
-    if (!f.foto.length) { A.toast('Adjuntá la foto del ticket: es obligatoria.', 'err'); return; }
+    if (!f.detalle || f.detalle.trim().length < 3) { A.toast('Indicá qué vas a comprar.', 'err'); return; }
+    if (!(Number(f.monto) > 0)) { A.toast('Indicá el monto de la compra.', 'err'); return; }
     s.compras = s.compras || [];
-    s.compras.push({ id: A.nextId('C'), detalle: f.detalle.trim(), monto: Number(f.monto), foto: f.foto[f.foto.length - 1], fecha: A.now(), estado: 'pendiente' });
-    A.ui.compra[s.id] = { detalle: '', monto: '', foto: [] };
-    A.commit('Compra declarada con ticket. El cliente fue notificado para aprobarla y pagarla.', 'ok');
+    s.compras.push({ id: A.nextId('C'), detalle: f.detalle.trim(), monto: Number(f.monto), foto: '', fecha: A.now(), estado: 'solicitada' });
+    A.ui.compra[s.id] = { detalle: '', monto: '' };
+    A.commit('Pedido de pago enviado. Cuando el cliente lo pague, hacé la compra y subí el ticket.', 'ok');
   };
-  A.actions['compra-estado'] = (el) => {
-    const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c); c.estado = el.dataset.v;
-    if (c.estado !== 'aprobada') { A.commit('Compra observada. El prestador fue notificado.', 'info'); return; }
-    A.save(); A.rerender();
-    A.actions['compra-pagar'](el);
+  A.actions['compra-observar'] = (el) => {
+    const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c); c.estado = 'observada';
+    A.commit('Pedido de compra observado. El prestador fue notificado.', 'info');
   };
   A.actions['compra-pagar'] = (el) => {
     const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c);
     const precio = A.precio(s.escrow, c.monto, 'materiales');
-    A.checkout({ intro: 'Pagás el <b>ticket de materiales</b> que aprobaste. El pago se acredita en el momento en la cuenta de Mercado Pago del prestador.',
+    A.checkout({ intro: 'Pagás la <b>compra de materiales</b> antes de que el prestador la haga. El pago se acredita en la cuenta de Mercado Pago del prestador, que después sube el ticket.',
       lineas: [['Servicio', '#' + s.id], [esc(c.detalle), A.money(c.monto)], ['Cargos del servicio y del medio de pago', A.money(precio - c.monto)]],
       total: precio, action: 'compra-pagar-ok', data: { s: s.id, c: c.id } });
   };
   A.actions['compra-pagar-ok'] = (el) => {
     const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c);
-    if (c.estado === 'pagada') { A.closeModal(); return; }
-    const precio = A.precio(s.escrow, c.monto, 'materiales');
-    A.cobrar(s, { concepto: `Pago de materiales (ticket ${c.id})`, ref: 'compra:' + c.id, cliente: precio, neto: c.monto });
-    c.estado = 'pagada';
-    A.hist(s, 'pago', `Ticket ${c.id} aprobado y pagado por el cliente (${A.money(c.monto)} al prestador)`, s.asignada.prestadorId);
-    A.closeModal(); A.commit(`Ticket pagado. Se acreditaron <b>${A.money(c.monto)}</b> al prestador.`, 'ok');
+    if (c.estado !== 'solicitada') { A.closeModal(); return; }
+    A.cobrar(s, { concepto: `Pago de compra de materiales ${c.id}`, ref: 'compra:' + c.id, cliente: A.precio(s.escrow, c.monto, 'materiales'), neto: c.monto });
+    c.estado = 'pagada'; c.pagadaEn = A.now();
+    A.hist(s, 'pago', `Compra ${c.id} pagada por el cliente antes de comprarla (${A.money(c.monto)} al prestador)`, s.asignada.prestadorId);
+    A.closeModal(); A.commit(`Compra pagada. El prestador recibió <b>${A.money(c.monto)}</b> para comprar los materiales.`, 'ok');
+  };
+  A.actions['compra-ticket'] = (el) => {
+    const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c); const t = A.ui.ticket[c.id];
+    const real = Number(t.monto);
+    if (!(real > 0)) { A.toast('Indicá el monto real del ticket.', 'err'); return; }
+    if (!t.foto.length) { A.toast('Adjuntá la foto del ticket: es obligatoria.', 'err'); return; }
+    c.montoReal = real; c.foto = t.foto[t.foto.length - 1]; c.estado = 'rendida'; delete A.ui.ticket[c.id];
+    let msg = 'Ticket subido.';
+    if (real < c.monto) {
+      // Más barato: crédito para el cliente en la etapa siguiente sin pagar (no hay reembolsos parciales)
+      c.credito = c.monto - real;
+      const i = s.hitos.findIndex((h) => !h.pagado);
+      if (i >= 0) { s.hitos[i].ajuste = (s.hitos[i].ajuste || 0) - Math.min(c.credito, A.montoEtapa(s, i)); c.creditoAplicado = true; A.recalcTrabajo(s); }
+      msg = c.creditoAplicado ? `Ticket subido. La diferencia (${A.money(c.credito)}) se descuenta de la etapa ${i + 1}.` : `Ticket subido. Quedó un crédito de ${A.money(c.credito)} para el cliente sin aplicar: no quedan etapas sin pagar.`;
+    } else if (real > c.monto) {
+      c.faltante = real - c.monto;
+      msg = `Ticket subido. La compra superó lo pagado en ${A.money(c.faltante)}: pedí un pago complementario.`;
+    }
+    A.hist(s, 'pago', `Ticket de la compra ${c.id} subido: ${A.money(real)} (pagado ${A.money(c.monto)})`, s.asignada.prestadorId);
+    A.commit(msg, 'ok');
+  };
+  A.actions['compra-complemento'] = (el) => {
+    const s = A.sol(el.dataset.s); const c = s.compras.find((x) => x.id === el.dataset.c);
+    s.compras.push({ id: A.nextId('C'), detalle: `Complemento: ${c.detalle}`, monto: c.faltante, foto: '', fecha: A.now(), estado: 'solicitada', complementoDe: c.id });
+    c.complementoPedido = true;
+    A.commit(`Pedido de pago complementario por ${A.money(c.faltante)} enviado.`, 'ok');
   };
 
   /* ---------- Acciones: ajuste de precio ---------- */
@@ -491,8 +529,9 @@
     if (rol === 'prestador') { const dn = m - e.neto; propuestoNeto = m; propuesto = e.total + A.precio(e, dn, 'etapa'); }
     else { const dg = m - e.total; const dn = A.netoDesde(e, dg, 'etapa'); propuesto = m; propuestoNeto = e.neto + dn; }
     if (!(m > 0) || propuesto === e.total) { A.toast('Indicá un total distinto del actual.', 'err'); return; }
-    const aprobado = s.hitos.reduce((a, h, i) => a + (h.estado === 'completado' ? A.montoEtapa(s, i) : 0), 0);
-    if (propuestoNeto < aprobado) { A.toast('El nuevo total no puede ser menor a lo de las etapas ya aprobadas.', 'err'); return; }
+    // Con el split no se puede devolver una parte de lo ya pagado: una rebaja solo puede aplicarse a etapas sin pagar
+    const pagadoNeto = s.hitos.reduce((a, h, i) => a + (h.pagado ? A.montoEtapa(s, i) : 0), 0) + (e.extraNeto || 0);
+    if (propuestoNeto < pagadoNeto) { A.toast(`Con Mercado Pago no se puede devolver una parte de lo ya pagado: el nuevo total no puede ser menor a ${A.money(rol === 'prestador' ? pagadoNeto : A.precio(e, pagadoNeto, 'etapa'))}. Si hay un problema con una etapa pagada, abrí una mediación.`, 'err'); return; }
     if (!f.motivo || f.motivo.trim().length < 10) { A.toast('Explicá el motivo (mín. 10 caracteres).', 'err'); return; }
     s.ajuste = { id: A.nextId('AJ'), por: rol, actual: e.total, propuesto, actualNeto: e.neto, propuestoNeto, motivo: f.motivo.trim(), estado: 'pendiente', fecha: A.now() };
     delete A.ui.ajuste[s.id];
@@ -513,15 +552,7 @@
       if (rol === 'cliente') A.actions['aj-pagar'](el); else A.commit('Ajuste aceptado. Como las etapas ya están pagadas, el cliente debe pagar la diferencia.', 'ok');
       return;
     }
-    let msg;
-    if (resto < 0) {
-      const monto = A.precio(e, -resto, 'etapa');
-      const r = A.reembolsar(s, pagosManoObra(s), monto, 'Reembolso parcial por ajuste de precio');
-      e.extraNeto = (e.extraNeto || 0) + resto; e.extraCliente = (e.extraCliente || 0) - r.total;
-      msg = rol === 'prestador' ? `Ajuste aceptado. Se reembolsaron ${A.money(r.total)} al cliente (Mercado Pago los descuenta de tu cuenta).` : `Ajuste aceptado. Se te reembolsaron ${A.money(r.total)}.`;
-    } else {
-      msg = rol === 'prestador' ? `Ajuste aceptado. Tu nuevo total a cobrar es ${A.money(a.propuestoNeto)}: se aplica a las etapas que faltan pagar.` : 'Ajuste aceptado: se aplica a las etapas que faltan pagar.';
-    }
+    const msg = rol === 'prestador' ? `Ajuste aceptado. Tu nuevo total a cobrar es ${A.money(a.propuestoNeto)}: se aplica a las etapas que faltan pagar.` : 'Ajuste aceptado: se aplica a las etapas que faltan pagar.';
     a.estado = 'aceptado'; A.recalcTrabajo(s);
     A.hist(s, 'pago', `Ajuste de precio aceptado: ${A.money(a.actual)} → ${A.money(a.propuesto)}`, s.asignada.prestadorId);
     A.commit(msg, 'ok');
@@ -573,7 +604,7 @@
       return;
     }
     let msg = 'Trabajo rechazado. Las etapas sin pagar se cancelaron.';
-    if (plan === 'reembolso') { const r = A.reembolsar(s, A.pagosEnJuego(s), A.enJuego(s), 'Reembolso de la etapa en curso por rescisión'); msg = `Trabajo rechazado. Se reembolsaron ${A.money(r.total)} al cliente.`; }
+    if (plan === 'reembolso') { const r = A.reembolsar(s, A.pagosEnJuego(s), 'Reembolso total de la etapa en curso por rescisión'); msg = `Trabajo rechazado. Se reembolsaron ${A.money(r.total)} al cliente.`; }
     s.estado = 'cancelada'; e.estado = 'cancelado';
     A.hist(s, 'contacto', `Trabajo rescindido por el ${rol}`);
     A.commit(msg, 'info');
@@ -586,7 +617,7 @@
     const s = A.sol(el.dataset.s); const f = A.ui.prop[s.id]; const enJ = A.enJuego(s);
     const p = { id: A.nextId('PR'), por: rolDe(s), tipo: f.tipo, plazo: Number(f.plazo) || 0, monto: Number(f.monto) || 0, nota: (f.nota || '').trim(), estado: 'pendiente', fecha: A.now() };
     if (p.tipo === 'corregir' && !(p.plazo >= 1 && p.plazo <= 30)) { A.toast('Indicá un plazo de 1 a 30 días.', 'err'); return; }
-    if (p.tipo === 'parcial' && !(p.monto > 0 && p.monto < enJ)) { A.toast(`El reembolso parcial tiene que ser mayor a 0 y menor a ${A.money(enJ)}.`, 'err'); return; }
+    if (p.tipo === 'compensar' || p.tipo === 'recobro') { const err = A.validarMontoResolucion(s, p.tipo, p.monto); if (err) { A.toast(err, 'err'); return; } }
     s.disputa.propuestas.forEach((x) => { if (x.estado === 'pendiente' && x.por === p.por) x.estado = 'reemplazada'; });
     s.disputa.propuestas.push(p); delete A.ui.prop[s.id];
     A.hist(s, 'contacto', `Propuesta de acuerdo del ${p.por}: ${textoProp(p)}`);
@@ -614,6 +645,8 @@
     A.commit('Venció el plazo de corrección: se reembolsó la etapa al cliente.', 'info');
   };
 
+  A.actions['rp-reintentar'] = (el) => { const r = A.reintentarReembolso(el.dataset.r); A.commit(r ? `Reembolso ejecutado: ${A.money(r.total)} devueltos al cliente.` : 'No se encontró el reembolso.', 'ok'); };
+
   /* ---------- Acciones: reclamo por garantía ---------- */
   A.actions['rec-open'] = (el) => { (A.ui.rec = A.ui.rec || {})[el.dataset.s] = { texto: '', fotos: [] }; A.rerender(); };
   A.actions['rec-cancel'] = (el) => { delete A.ui.rec[el.dataset.s]; A.rerender(); };
@@ -630,17 +663,17 @@
   A.actions['rec-responder'] = (el) => {
     const s = A.sol(el.dataset.s); const f = A.ui.recOf[s.id]; const r = s.reclamo;
     if (!f.texto || f.texto.trim().length < 5) { A.toast('Escribí tu respuesta.', 'err'); return; }
-    if (f.modo === 'reembolso' && !(Number(f.monto) > 0)) { A.toast('Indicá el monto del reembolso.', 'err'); return; }
+
     r.respuestas.push({ autor: 'prestador', texto: f.texto.trim(), fecha: A.now() });
     r.estado = { corregir: 'en_correccion', reembolso: 'oferta', rechazar: 'rechazado' }[f.modo];
-    if (f.modo === 'reembolso') r.oferta = Number(f.monto);
+    if (f.modo === 'reembolso') { const u = s.escrow.pagos.filter((p) => (p.ref || '').indexOf('etapa:') === 0 && p.cliente - p.reembolsado > 0).slice(-1)[0]; r.ofertaPago = u.id; r.oferta = u.cliente - u.reembolsado; }
     delete A.ui.recOf[s.id];
     A.hist(s, 'contacto', `Respuesta del prestador al reclamo por garantía: ${{ corregir: 'acepta corregirlo', reembolso: `ofrece un reembolso de ${A.money(r.oferta)}`, rechazar: 'lo rechaza' }[f.modo]}`, s.asignada.prestadorId);
     A.commit('Respuesta enviada. El cliente fue notificado.', 'ok');
   };
   A.actions['rec-aceptar-oferta'] = (el) => {
     const s = A.sol(el.dataset.s); const r = s.reclamo;
-    const res = A.reembolsar(s, pagosManoObra(s), r.oferta, 'Reembolso acordado por reclamo de garantía', false);
+    const res = A.reembolsar(s, [A.buscarPago(s, r.ofertaPago)], 'Reembolso total de la última etapa (reclamo de garantía)', false);
     r.estado = 'reembolsado'; r.respuestas.push({ autor: 'cliente', texto: `Acepto el reembolso de ${A.money(res.total)}.`, fecha: A.now() });
     A.hist(s, 'pago', `Reclamo por garantía resuelto con un reembolso acordado de ${A.money(res.total)}`, s.asignada.prestadorId);
     A.commit(`Se te reembolsaron ${A.money(res.total)}.`, 'ok');
@@ -665,7 +698,7 @@
     const s = A.sol(el.dataset.s); const r = s.reclamosMP.find((x) => x.id === el.dataset.r); r.estado = el.dataset.v;
     if (r.estado === 'a_favor_cliente') {
       const p = s.escrow.pagos.find((x) => x.id === r.pagoId);
-      A.reembolsar(s, [p], r.monto, `Devolución ordenada por Mercado Pago (${r.tipo.toLowerCase()})`, false);
+      A.reembolsar(s, [p], `Devolución total ordenada por Mercado Pago (${r.tipo.toLowerCase()})`, false);
       const res = s.disputa && s.disputa.resolucion; r.contraFallo = !!(res && res.tipo === 'forzosa');
     }
     A.hist(s, 'contacto', `Mercado Pago resolvió el ${r.tipo.toLowerCase()} ${r.estado === 'a_favor_cliente' ? 'a favor del cliente: se le descontó el monto al prestador' : 'a favor del prestador'}`);
@@ -713,6 +746,7 @@
   };
   A.actions['hito-ok'] = (el) => {
     const s = A.sol(el.dataset.s); const h = s.hitos[+el.dataset.i];
+    if (s.ajuste && s.ajuste.estado === 'pago_pendiente') { A.toast('Falta que el cliente pague la diferencia del ajuste: el trabajo extra se hace después del pago.', 'err'); return; }
     h.estado = 'por_aprobar'; h.hora = A.shortNow(); h.observacion = ''; h.terminadaEn = A.now();
     if (s.correccion && !s.correccion.cumplida && s.correccion.hito === +el.dataset.i) { s.correccion.cumplida = true; A.hist(s, 'contacto', 'El prestador terminó la corrección en el plazo', s.asignada.prestadorId); }
     A.commit(`Etapa “${esc(h.nombre)}” terminada. El cliente fue notificado: si no la aprueba ni la observa en ${A.plazoAprob()} días, se aprueba automáticamente.`, 'ok');

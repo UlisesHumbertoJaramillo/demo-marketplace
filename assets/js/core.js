@@ -1,6 +1,6 @@
 /* Estado, persistencia local y utilidades de UI. Sin servidor: todo vive en el navegador. */
 (function () {
-  const KEY = 'oficiosya-demo-v11';
+  const KEY = 'oficiosya-demo-v12';
 
   function load() {
     try {
@@ -98,59 +98,66 @@
   };
   App.enJuego = (s) => App.pagosEnJuego(s).reduce((a, p) => a + p.cliente - p.reembolsado, 0);
 
-  /* Cobro con split: crea el pago a nombre del prestador y registra cómo se reparte.
-     Si el prestador tiene deuda con OficiosYa (reembolso que no pudo ejecutarse), se recupera hasta el 50% de lo que recibe. */
+  /* Cobro con split: crea el pago a nombre del prestador y registra cómo se reparte. */
   App.cobrar = (s, o) => {
     const e = s.escrow; const mp = o.mp != null ? o.mp : App.costoMP(e);
-    const pr = App.user(o.prestadorId || (s.asignada && s.asignada.prestadorId));
     const mpFee = Math.round(o.cliente * mp);
-    let fee = Math.max(0, o.cliente - o.neto - mpFee);
-    let recibe = o.cliente - mpFee - fee; let recupero = 0;
-    if (pr && pr.deuda > 0) { recupero = Math.min(pr.deuda, Math.round(recibe * 0.5)); pr.deuda -= recupero; fee += recupero; recibe -= recupero; }
-    const pago = { id: App.newPaymentId(), concepto: o.concepto, ref: o.ref, cliente: o.cliente, recibe, mpFee, fee, recupero, reembolsado: 0, fecha: App.now() };
+    const fee = Math.max(0, o.cliente - o.neto - mpFee);
+    const recibe = o.cliente - mpFee - fee;
+    const pago = { id: App.newPaymentId(), concepto: o.concepto, ref: o.ref, cliente: o.cliente, recibe, mpFee, fee, reembolsado: 0, fecha: App.now() };
     if (e && o.guardar !== false) {
       e.pagos.push(pago);
       e.cobrado = (e.cobrado || 0) + o.cliente; e.liberadoPrestador = (e.liberadoPrestador || 0) + recibe;
       e.comisionCobrada = (e.comisionCobrada || 0) + fee; e.costoMPTotal = (e.costoMPTotal || 0) + mpFee;
     }
-    App.mov(o.concepto, s.id, o.cliente, `POST /v1/payments (token OAuth del prestador) { "transaction_amount": ${o.cliente}, "application_fee": ${fee} } → prestador ${recibe} · costo MP ${mpFee}${recupero ? ` · recupero de deuda ${recupero}` : ''}`);
+    App.mov(o.concepto, s.id, o.cliente, `POST /v1/payments (token OAuth del prestador) { "transaction_amount": ${o.cliente}, "application_fee": ${fee} } → prestador ${recibe} · costo MP ${mpFee}`);
     return pago;
   };
-  /* Reembolso sobre uno o más pagos (del más reciente al más antiguo). MP lo descuenta en proporción de la cuenta del
-     prestador y de la de OficiosYa. Si el prestador no tiene saldo, el reembolso falla: OficiosYa reintegra al cliente con su
-     fondo de garantía y lo que le correspondía devolver al prestador queda como deuda (se recupera de sus próximos cobros). */
-  App.reembolsar = (s, pagos, monto, concepto, sinSaldo, prestadorId) => {
-    const e = s.escrow; let resta = monto; let prest = 0, plat = 0, recibe = 0;
-    pagos.slice().reverse().forEach((p) => {
-      const r = Math.min(p.cliente - p.reembolsado, resta); if (r <= 0) return;
-      const feeP = Math.round((r * p.fee) / p.cliente); const recP = Math.round((r * p.recibe) / p.cliente);
-      p.reembolsado += r; resta -= r; plat += feeP; prest += r - feeP; recibe += recP;
-      App.mov(sinSaldo ? concepto + ' · rechazado por MP' : concepto, s.id, r, sinSaldo
-        ? `POST /v1/payments/${p.id}/refunds { "amount": ${r} } → error: saldo insuficiente en la cuenta del prestador`
-        : `POST /v1/payments/${p.id}/refunds { "amount": ${r} } → se descuentan ${r - feeP} al prestador y ${feeP} a OficiosYa`);
+  /* Reembolsos: con el split 1:1 se diseña con reembolsos TOTALES por pago (no se devuelve una parte de un pago).
+     MP los descuenta en proporción de la cuenta del prestador y de la de OficiosYa. No hay fondo de garantía:
+     si el prestador no tiene saldo, MP rechaza el reembolso; queda PENDIENTE, el prestador se suspende hasta que se
+     ejecute y se reintenta cuando tenga saldo (el cliente además puede reclamar directamente en Mercado Pago). */
+  App.reembolsar = (s, pagos, concepto, sinSaldo, prestadorId) => {
+    const e = s.escrow; const vivos = pagos.filter((p) => p.cliente - p.reembolsado > 0 && !p.pendienteReembolso);
+    const total = vivos.reduce((a, p) => a + p.cliente - p.reembolsado, 0);
+    if (!total) return { total: 0, sinSaldo: false };
+    if (sinSaldo) {
+      vivos.forEach((p) => { p.pendienteReembolso = true;
+        App.mov(concepto + ' · rechazado por MP', s.id, p.cliente - p.reembolsado, `POST /v1/payments/${p.id}/refunds → error: saldo insuficiente en la cuenta del prestador. Queda pendiente.`); });
+      const pid = prestadorId || (s.asignada ? s.asignada.prestadorId : null); const pr = App.user(pid);
+      (App.state.reembolsosPendientes = App.state.reembolsosPendientes || []).push({ id: App.nextId('RP'), solId: s.id, pagoIds: vivos.map((p) => p.id), monto: total, concepto, prestadorId: pid, fecha: App.now() });
+      if (pr && pr.estado === 'activo') { pr.estado = 'suspendido'; pr.suspendidoPorReembolso = true; }
+      App.hist(s, 'contacto', `Mercado Pago rechazó el reembolso de ${App.money(total)} por falta de saldo del prestador: queda pendiente y el prestador quedó suspendido hasta que se ejecute`);
+      return { total, sinSaldo: true, pendiente: true };
+    }
+    let prest = 0, plat = 0, recibe = 0;
+    vivos.forEach((p) => {
+      const r = p.cliente - p.reembolsado;
+      plat += p.fee * (r / p.cliente); recibe += p.recibe * (r / p.cliente); prest += r;
+      p.reembolsado += r; p.pendienteReembolso = false;
+      App.mov(concepto, s.id, r, `POST /v1/payments/${p.id}/refunds (reembolso total del pago) → se descuentan ${Math.round(r - p.fee * (r / p.cliente))} al prestador y ${Math.round(p.fee * (r / p.cliente))} a OficiosYa`);
     });
-    const total = monto - resta;
     if (e) {
-      e.reembolsado = (e.reembolsado || 0) + total; e.liberadoPrestador = (e.liberadoPrestador || 0) - recibe;
-      e.comisionCobrada = (e.comisionCobrada || 0) - plat; e.costoMPTotal = (e.costoMPTotal || 0) - (prest - recibe);
+      e.reembolsado = (e.reembolsado || 0) + total; e.liberadoPrestador = (e.liberadoPrestador || 0) - Math.round(recibe);
+      e.comisionCobrada = (e.comisionCobrada || 0) - Math.round(plat); e.costoMPTotal = (e.costoMPTotal || 0) - Math.round(prest - recibe - plat);
     }
-    let cubierto = 0, pendiente = 0;
-    if (sinSaldo && total) {
-      // El fondo de garantía cubre hasta un tope por caso; el excedente queda pendiente de reintegro al cliente.
-      cubierto = Math.min(total, App.cfg('topeGarantia', 100000)); pendiente = total - cubierto;
-      const pr = App.user(prestadorId || (s.asignada ? s.asignada.prestadorId : null));
-      if (pr) pr.deuda = (pr.deuda || 0) + prest;
-      if (e) { e.garantia = (e.garantia || 0) + cubierto; e.pendienteCliente = (e.pendienteCliente || 0) + pendiente; }
-      App.mov('Reintegro al cliente con el fondo de garantía', s.id, cubierto, `Transferencia desde la cuenta de OficiosYa · deuda registrada al prestador: ${prest}${pendiente ? ` · supera el tope por caso: quedan ${pendiente} pendientes de reintegro` : ''}`);
-      // Suspensión automática si la deuda supera el máximo configurado
-      if (pr && pr.estado === 'activo' && pr.deuda > App.cfg('deudaMaxima', 50000)) {
-        pr.estado = 'suspendido'; pr.suspendidoPorDeuda = true;
-        App.mov('Prestador suspendido por deuda', s.id, pr.deuda, `La deuda supera el máximo de ${App.cfg('deudaMaxima', 50000)}`);
-        App.hist(s, 'contacto', 'El prestador quedó suspendido automáticamente: su deuda con OficiosYa supera el máximo permitido');
-      }
-    }
-    return { total, prest, plat, sinSaldo: !!sinSaldo, cubierto, pendiente };
+    return { total, sinSaldo: false };
   };
+  /* Busca un pago por id en los pagos del trabajo o en las visitas de la solicitud */
+  App.buscarPago = (s, id) => (s.escrow && s.escrow.pagos.find((p) => p.id === id)) || App.visitas(s).map((p) => p.visita).find((v) => v && v.id === id);
+  /* Reintenta un reembolso pendiente (el prestador ya tiene saldo). Si no le quedan pendientes, se reactiva su cuenta. */
+  App.reintentarReembolso = (id) => {
+    const lista = App.state.reembolsosPendientes || []; const rp = lista.find((x) => x.id === id); if (!rp) return null;
+    const s = App.sol(rp.solId); const pagos = rp.pagoIds.map((pid) => App.buscarPago(s, pid)).filter(Boolean);
+    pagos.forEach((p) => { p.pendienteReembolso = false; });
+    const r = App.reembolsar(s, pagos, rp.concepto + ' (reintento)', false, rp.prestadorId);
+    App.state.reembolsosPendientes = lista.filter((x) => x.id !== id);
+    const pr = App.user(rp.prestadorId);
+    if (pr && pr.suspendidoPorReembolso && !App.state.reembolsosPendientes.some((x) => x.prestadorId === pr.id)) { pr.estado = 'activo'; pr.suspendidoPorReembolso = false; }
+    App.hist(s, 'pago', `Reembolso pendiente ejecutado: se devolvieron ${App.money(r.total)} al cliente`);
+    return r;
+  };
+  App.pendientesDe = (filtro) => (App.state.reembolsosPendientes || []).filter(filtro);
   /* ---------- Aprobación de etapas (sin PIN) ----------
      Cada etapa terminada la aprueba el cliente. Si no la aprueba ni la observa dentro del plazo configurable,
      se aprueba automáticamente. Al aprobarse la última etapa, el trabajo queda cerrado. */
@@ -175,6 +182,9 @@
     if (n) App.save();
     return n;
   };
+  /* Tamaño máximo de una etapa, en % del total de mano de obra del presupuesto (con split 1:1 las disputas se resuelven
+     etapa por etapa y sin reembolsos parciales: etapas chicas acotan lo que está en juego) */
+  App.maxEtapaPct = () => App.cfg('maxEtapaPct', 40);
   /* ---------- Disputas: mediación, arbitraje, corrección, garantía y reclamos en Mercado Pago ----------
      Con el split el dinero ya está en la cuenta del prestador: el arbitraje prioriza que el trabajo se corrija y,
      si hay que devolver dinero, se pide un reembolso a Mercado Pago. Los plazos se configuran en el panel admin. */
@@ -201,49 +211,78 @@
     d.propuestas.forEach((p) => { if (p.estado === 'pendiente') p.estado = 'vencida'; });
     App.hist(s, 'contacto', `Caso ${d.id} escalado a arbitraje: ${motivo}`);
   };
-  /* Ejecuta una resolución (por acuerdo en la mediación o por dictamen del árbitro).
-     plan: { tipo: 'total' | 'parcial' | 'forzosa' | 'corregir', reembolso, plazo, titulo, detalle, api, nota } */
+  /* Ejecuta una resolución (por acuerdo en la mediación o por dictamen del árbitro). Con el split 1:1 no hay reembolsos parciales:
+     tipos: 'corregir' | 'total' (reembolso total de la etapa) | 'forzosa' (sin reembolso) |
+            'compensar' (descuento de X en las etapas sin pagar) | 'recobro' (reembolso total + X de lo hecho se suma a la etapa siguiente) */
   App.ejecutarResolucion = (s, plan, por, sinSaldo) => {
     const d = s.disputa; const e = s.escrow;
+    const i = s.hitos.findIndex((h) => h.estado !== 'completado'); const h = s.hitos[i];
     let r = null;
+    const cerrarEtapa = () => { h.estado = 'completado'; h.hora = App.shortNow(); h.porResolucion = true; h.terminadaEn = null; };
+    const sinPagar = () => s.hitos.map((x, k) => k).filter((k) => k > i && !s.hitos[k].pagado);
     if (plan.tipo === 'corregir') {
-      const i = s.hitos.findIndex((h) => h.estado !== 'completado');
-      const h = s.hitos[i]; const plazo = plan.plazo || App.cfg('plazoCorreccion', 5);
+      const plazo = plan.plazo || App.cfg('plazoCorreccion', 5);
       h.estado = 'pendiente'; h.terminadaEn = null;
       h.observacion = `Corrección ${por === 'acuerdo' ? 'acordada' : 'ordenada por el árbitro'}: ${plan.nota || 'corregir lo observado por el cliente'}`;
       s.correccion = { hito: i, vence: App.fmtISO(new Date(Date.now() + plazo * 86400000)), plazo, monto: App.enJuego(s), cumplida: false };
       s.estado = 'en_curso';
+    } else if (plan.tipo === 'compensar') {
+      // La etapa en curso se da por cumplida con un descuento de X sobre las etapas que faltan pagar (sin mover dinero)
+      cerrarEtapa(); let resta = plan.monto;
+      sinPagar().forEach((k) => { if (!resta) return; const q = Math.min(App.montoEtapa(s, k), resta); s.hitos[k].ajuste = (s.hitos[k].ajuste || 0) - q; resta -= q; });
+      App.recalcTrabajo(s); s.estado = 'en_curso';
+    } else if (plan.tipo === 'recobro') {
+      // Reembolso total del pago de la etapa y lo que sí se hizo (X) se cobra junto con la etapa siguiente
+      r = App.reembolsar(s, App.pagosEnJuego(s), `Reembolso total de la etapa (${por === 'acuerdo' ? 'acuerdo de mediación' : 'arbitraje'})`, !!sinSaldo);
+      cerrarEtapa(); const k = sinPagar()[0]; s.hitos[k].ajuste = (s.hitos[k].ajuste || 0) + plan.monto;
+      App.recalcTrabajo(s); s.estado = 'en_curso';
     } else {
-      if (plan.reembolso) r = App.reembolsar(s, App.pagosEnJuego(s), plan.reembolso, `Reembolso ${plan.tipo === 'total' ? 'total' : 'parcial'} de la etapa (${por === 'acuerdo' ? 'acuerdo de mediación' : 'arbitraje'})`, !!sinSaldo);
+      if (plan.tipo === 'total') r = App.reembolsar(s, App.pagosEnJuego(s), `Reembolso total de la etapa (${por === 'acuerdo' ? 'acuerdo de mediación' : 'arbitraje'})`, !!sinSaldo);
       s.estado = 'resuelta'; e.estado = 'resuelto';
     }
-    d.resolucion = { tipo: plan.tipo, titulo: plan.titulo, detalle: plan.detalle, api: plan.api || '', nota: plan.nota || '', por, arbitroId: por === 'acuerdo' ? null : por, fecha: App.now(), plazo: plan.plazo };
+    d.resolucion = { tipo: plan.tipo, titulo: plan.titulo, detalle: plan.detalle, api: plan.api || '', nota: plan.nota || '', por, arbitroId: por === 'acuerdo' ? null : por, fecha: App.now(), plazo: plan.plazo, monto: plan.monto };
     App.hist(s, 'contacto', `${por === 'acuerdo' ? 'Acuerdo en la mediación' : 'Arbitraje resuelto'}: ${plan.titulo}`);
     return r;
   };
+  /* Etapas sin pagar después de la etapa en curso y su monto (lo máximo que se puede compensar) */
+  App.sinPagarInfo = (s) => {
+    const i = s.hitos.findIndex((h) => h.estado !== 'completado'); let neto = 0, n = 0;
+    s.hitos.forEach((h, k) => { if (k > i && !h.pagado) { neto += App.montoEtapa(s, k); n++; } });
+    return { n, neto, etapaEnCurso: i >= 0 ? App.montoEtapa(s, i) : 0 };
+  };
   /* Arma una resolución (la usan la mediación y el árbitro) */
   App.planResolucion = (s, tipo, o) => {
-    o = o || {}; const enJ = App.enJuego(s); const sinPagar = s.hitos.filter((h) => !h.pagado).length;
+    o = o || {}; const enJ = App.enJuego(s); const sp = App.sinPagarInfo(s); const m = Math.round(Number(o.monto) || 0);
     let plan;
     if (tipo === 'corregir') {
       const plazo = Number(o.plazo) || App.cfg('plazoCorreccion', 5);
-      plan = { tipo, plazo, titulo: `Corregir la etapa (${plazo} días)`, detalle: `El prestador tiene ${plazo} días para corregir la etapa en curso sin costo. Si no la marca como terminada en ese plazo, se le reembolsa al cliente el pago de la etapa (${App.money(enJ)}).`, reembolso: 0 };
-    } else if (tipo === 'parcial') {
-      const m = Math.round(Number(o.monto) || 0);
-      plan = { tipo, titulo: 'Reembolso parcial', detalle: `Se reembolsan ${App.money(m)} al cliente sobre el pago de la etapa en curso (${App.money(enJ)}). El resto queda para el prestador.`, reembolso: m };
+      plan = { tipo, plazo, titulo: `Corregir la etapa (${plazo} días)`, detalle: `El prestador tiene ${plazo} días para corregir la etapa en curso sin costo. Si no la marca como terminada en ese plazo, se le reembolsa al cliente el total del pago de la etapa (${App.money(enJ)}).`, reembolso: 0 };
+    } else if (tipo === 'compensar') {
+      plan = { tipo, monto: m, titulo: `Compensar ${App.money(m)} en las etapas sin pagar`, detalle: `La etapa en curso se da por cumplida y el prestador cobra ${App.money(m)} menos en las etapas que faltan pagar (${sp.n}). No hay movimiento de dinero.`, reembolso: 0 };
+    } else if (tipo === 'recobro') {
+      plan = { tipo, monto: m, titulo: `Reembolso total + recobro de ${App.money(m)}`, detalle: `Se reembolsa el total del pago de la etapa en curso (${App.money(enJ)}) y lo que sí se hizo (${App.money(m)} para el prestador) se cobra junto con la etapa siguiente.`, reembolso: enJ };
     } else if (tipo === 'total') {
-      plan = { tipo, titulo: 'Reembolso total de la etapa en curso', detalle: `Se reembolsa el 100% del pago de la etapa en curso (${App.money(enJ)}) al cliente. Lo pagado por etapas aprobadas no se modifica.`, reembolso: enJ };
+      plan = { tipo, titulo: 'Reembolso total de la etapa en curso', detalle: `Se reembolsa el total del pago de la etapa en curso (${App.money(enJ)}) al cliente. Lo pagado por etapas aprobadas no se modifica.`, reembolso: enJ };
     } else {
       plan = { tipo: 'forzosa', titulo: 'A favor del prestador (sin reembolso)', detalle: `El pago de la etapa en curso (${App.money(enJ)}) queda para el prestador. El servicio se considera brindado.`, reembolso: 0 };
     }
-    if (plan.tipo !== 'corregir' && sinPagar) plan.detalle += ` Se cancelan ${sinPagar} etapa(s) sin pagar.`;
+    if ((plan.tipo === 'total' || plan.tipo === 'forzosa') && sp.n) plan.detalle += ` Se cancelan ${sp.n} etapa(s) sin pagar.`;
     plan.nota = o.nota || '';
     return plan;
+  };
+  /* Valida el monto de una compensación o un recobro */
+  App.validarMontoResolucion = (s, tipo, monto) => {
+    const sp = App.sinPagarInfo(s); const m = Number(monto) || 0;
+    if (!sp.n) return 'No quedan etapas sin pagar: solo se puede corregir, reembolsar el total de la etapa o resolver sin reembolso.';
+    if (!(m > 0)) return 'Indicá el monto.';
+    if (tipo === 'compensar' && m > Math.min(sp.neto, sp.etapaEnCurso)) return `El descuento no puede superar ${App.money(Math.min(sp.neto, sp.etapaEnCurso))} (la etapa en curso o lo que falta pagar).`;
+    if (tipo === 'recobro' && m >= sp.etapaEnCurso) return `Lo hecho tiene que ser menor al monto de la etapa (${App.money(sp.etapaEnCurso)}).`;
+    return '';
   };
   /* Corrección vencida sin que el prestador marque la etapa como terminada: se reembolsa la etapa en curso */
   App.incumplirCorreccion = (s) => {
     const c = s.correccion; if (!c || c.cumplida || c.incumplida) return;
-    const r = App.reembolsar(s, App.pagosEnJuego(s), App.enJuego(s), 'Reembolso por no corregir la etapa en el plazo', false);
+    const r = App.reembolsar(s, App.pagosEnJuego(s), 'Reembolso total por no corregir la etapa en el plazo', false);
     c.incumplida = true; s.estado = 'resuelta'; s.escrow.estado = 'resuelto';
     App.hist(s, 'contacto', `Venció el plazo de corrección sin que el prestador terminara la etapa: se reembolsaron ${App.money(r.total)} al cliente`);
     return r;
@@ -288,12 +327,11 @@
   App.resolverVisita = (s, p, tipo, o) => {
     o = o || {}; const v = p.visita;
     if (tipo === 'reembolso') {
-      const r = App.reembolsar(s, [v], v.monto - (v.reembolsado || 0), 'Reembolso de visita (el prestador no se presentó)', !!o.sinSaldo, p.prestadorId);
-      if (r.sinSaldo) { v.garantia = (v.garantia || 0) + r.cubierto; v.pendienteCliente = (v.pendienteCliente || 0) + r.pendiente; }
+      const r = App.reembolsar(s, [v], 'Reembolso de visita (el prestador no se presentó)', !!o.sinSaldo, p.prestadorId);
       p.estado = 'visita_cancelada'; v.cancelada = App.shortNow();
       const pr = App.user(p.prestadorId); pr.reportes = pr.reportes || [];
       pr.reportes.push({ id: App.nextId('DEN'), tipo: 'No se presentó a la visita', texto: v.reclamo ? v.reclamo.motivo : 'El cliente informó que el prestador no se presentó a la visita pagada.', fotos: [], autorId: s.clienteId, solicitudId: s.id, fecha: App.now(), resuelto: false });
-      App.hist(s, 'visita_cancelada', `Visita cancelada: el prestador no se presentó. Reembolso total de la visita${r.sinSaldo ? ' (con el fondo de garantía)' : ''}`, p.prestadorId);
+      App.hist(s, 'visita_cancelada', `Visita cancelada: el prestador no se presentó. Reembolso total de la visita${r.sinSaldo ? ' (pendiente: el prestador no tiene saldo)' : ''}`, p.prestadorId);
     } else if (tipo === 'sin_reembolso') {
       p.estado = 'visita_realizada'; v.realizada = App.shortNow(); v.clienteAusente = true;
       const cl = App.user(s.clienteId); cl.reportes = cl.reportes || [];

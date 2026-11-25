@@ -11,8 +11,8 @@ window.SEED = function () {
     plazoArbitro: 10, // días hábiles para que el árbitro resuelva
     plazoCorreccion: 5, // días por defecto para corregir una etapa
     plazoReclamo: 90, // días después del cierre para un reclamo por garantía
-    topeGarantia: 100000, // tope por caso del fondo de garantía
-    deudaMaxima: 50000, // deuda a partir de la cual el prestador se suspende automáticamente
+    maxEtapaPct: 40, // ninguna etapa puede superar este % del total de mano de obra del presupuesto
+    reembolsosPendientes: [], // reembolsos que MP rechazó por falta de saldo del prestador (se reintentan)
     plazoVisita: 48, // horas: confirmación automática de la visita y plazo del prestador para responder un "no vino"
     plazoAprobacion: 7, // días: una etapa terminada sin respuesta del cliente se aprueba automáticamente (configurable)
     costoMP: 0.06, // costo de procesamiento estimado de Mercado Pago; también lo paga el cliente (configurable)
@@ -111,13 +111,13 @@ window.SEED = function () {
           { id: 'P-5', prestadorId: 'u-roberto', fecha: '2026-11-08 15:00', estado: 'aceptada', montos: [15000, 28000, 32000, 10000], incluyeMateriales: true, detalleMateriales: 'Disyuntor 40A 30mA, térmicas, 25m de cable 4mm IRAM. Se rinden con ticket.', costoMateriales: 45000, aportaHerramientas: true, detalleHerramientas: 'Pinza amperométrica, telurímetro, taladro.', aclaracion: '', nota: 'Garantía técnica de 6 meses.' },
         ],
         asignada: { postulacionId: 'P-5', prestadorId: 'u-roberto' },
-        // Etapas 1 a 3 pagadas (1 y 2 aprobadas, 3 esperando aprobación), etapa 4 sin pagar y ticket C-1 pagado.
+        // Etapas 1 a 3 pagadas (1 y 2 aprobadas, 3 esperando aprobación), etapa 4 sin pagar y compra C-1 pagada y rendida con ticket; la compra C-2 espera el pago del cliente.
         // Los pagos con split se generan abajo, en la normalización.
         escrow: { fecha: haceDias(9) },
         evidenciasPost: [IMG + 'seg-tablero.jpg', IMG + 'seg-multimetro.jpg', IMG + 'seg-canalizacion.jpg'],
         compras: [
-          { id: 'C-1', detalle: 'Disyuntor 40A 30mA, 4 térmicas 2x16A y riel DIN', monto: 38000, foto: IMG + 'ticket-ejemplo.svg', fecha: '2026-11-11 14:40', estado: 'pagada' },
-          { id: 'C-2', detalle: '25 m de cable 4 mm IRAM y prensacables', monto: 14500, foto: IMG + 'ticket-ejemplo.svg', fecha: '2026-11-12 10:05', estado: 'pendiente' },
+          { id: 'C-1', detalle: 'Disyuntor 40A 30mA, 4 térmicas 2x16A y riel DIN', monto: 38000, montoReal: 38000, foto: IMG + 'ticket-ejemplo.svg', fecha: '2026-11-11 14:40', estado: 'rendida' },
+          { id: 'C-2', detalle: '25 m de cable 4 mm IRAM y prensacables', monto: 14500, foto: '', fecha: '2026-11-12 10:05', estado: 'solicitada' },
         ],
       },
       {
@@ -249,7 +249,7 @@ window.SEED = function () {
   const alC = (n) => bruto(n, C.etapa);
   const pMat = (m) => bruto(m, C.materiales);
   let nPay = 0;
-  data.users.forEach((u) => { if (u.rol === 'prestador') { u.mpCuenta = { usuario: u.email, vinculada: '2026-08-01', kyc: 6 }; u.deuda = 0; } });
+  data.users.forEach((u) => { if (u.rol === 'prestador') { u.mpCuenta = { usuario: u.email, vinculada: '2026-08-01', kyc: 6 }; } });
   data.solicitudes.forEach((s) => {
     s.compras = s.compras || [];
     if (!s.escrow) return;
@@ -260,16 +260,16 @@ window.SEED = function () {
     const pagar = (concepto, ref, cliente, neto, fecha) => {
       const mpFee = Math.round(cliente * MP); const fee = Math.max(0, cliente - neto - mpFee); const recibe = cliente - mpFee - fee;
       const id = 'MP-98' + s.id.slice(4) + String(++nPay).padStart(3, '0');
-      e.pagos.push({ id, concepto, ref, cliente, recibe, mpFee, fee, recupero: 0, reembolsado: 0, fecha });
+      e.pagos.push({ id, concepto, ref, cliente, recibe, mpFee, fee, reembolsado: 0, fecha });
       e.cobrado += cliente; e.liberadoPrestador += recibe; e.comisionCobrada += fee; e.costoMPTotal += mpFee;
       data.movimientos.push({ fecha, tipo: concepto, solicitudId: s.id, monto: cliente, api: `POST /v1/payments (token OAuth del prestador) { "transaction_amount": ${cliente}, "application_fee": ${fee} } → prestador ${recibe} · costo MP ${mpFee}` });
     };
     if (s.estado === 'completada') s.hitos.forEach((h) => { h.pagado = true; });
     if (s.estado === 'completada' && mat && !s.compras.length) {
-      s.compras.push({ id: 'C-' + s.id.slice(4), detalle: p.detalleMateriales || 'Materiales', monto: mat, foto: IMG + 'ticket-ejemplo.svg', fecha: e.fecha, estado: 'pagada' });
+      s.compras.push({ id: 'C-' + s.id.slice(4), detalle: p.detalleMateriales || 'Materiales', monto: mat, montoReal: mat, foto: IMG + 'ticket-ejemplo.svg', fecha: e.fecha, estado: 'rendida' });
     }
     s.hitos.forEach((h, i) => { if (h.pagado) pagar(`Pago de etapa ${i + 1}`, 'etapa:' + i, alC(p.montos[i]), p.montos[i], e.fecha); });
-    s.compras.forEach((c) => { if (c.estado === 'pagada') pagar(`Pago de materiales (ticket ${c.id})`, 'compra:' + c.id, pMat(c.monto), c.monto, c.fecha); });
+    s.compras.forEach((c) => { if (c.estado === 'pagada' || c.estado === 'rendida') pagar(`Pago de materiales (ticket ${c.id})`, 'compra:' + c.id, pMat(c.monto), c.monto, c.fecha); });
     e.paymentId = e.pagos[0].id;
     if (s.estado === 'completada') s.cerradaEn = s.resena ? s.resena.fecha : e.fecha;
     e.neto = p.montos.reduce((a, b) => a + b, 0); e.total = p.montos.reduce((a, b) => a + alC(b), 0);

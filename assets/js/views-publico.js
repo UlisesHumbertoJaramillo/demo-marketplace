@@ -232,7 +232,7 @@
           </ul></div>
         <div class="bg-slate-950 text-white p-5">
           <div class="font-head font-bold flex items-center gap-2 mb-1">${A.icon('gavel', 'text-amber-400')} Arbitraje de disputas</div>
-          <p class="text-xs opacity-80">Si algo sale mal, cliente o prestador abren una disputa con contra-evidencias fotográficas. Un árbitro decide sobre la etapa en curso: reembolso parcial, total o a favor del prestador.</p></div>
+          <p class="text-xs opacity-80">Si algo sale mal, cliente o prestador abren una disputa con contra-evidencias fotográficas. Primero hay una mediación; si no hay acuerdo, un árbitro decide sobre la etapa en curso: corregirla, compensar en las etapas que faltan pagar, reembolsarla completa o resolver a favor del prestador.</p></div>
       </aside>
     </div>`;
   };
@@ -418,7 +418,7 @@
       emailVerificado: true, aclaraciones: [], foto: r.foto[r.foto.length - 1], estado: r.rol === 'prestador' ? 'pendiente' : 'activo',
       oficio: oficiosSel(r).join(' / '), oficios: oficiosSel(r), matricula: (r.matricula || '').trim(), matriculaFoto: r.matFoto && r.matFoto.length ? r.matFoto[r.matFoto.length - 1] : '',
       matriculaRequerida: oficiosSel(r).some((o) => window.OFICIOS_MATRICULA[o]), rating: null, trabajos: 0, zona: '', reportes: [],
-      mpCuenta: r.rol === 'prestador' ? { usuario: r.email.trim(), vinculada: A.now(), kyc: 6 } : null, deuda: 0,
+      mpCuenta: r.rol === 'prestador' ? { usuario: r.email.trim(), vinculada: A.now(), kyc: 6 } : null,
     });
     A.state.currentUserId = id;
     A.ui = { reg: { step: 3, newId: id } };
@@ -567,7 +567,7 @@
           ${row('Foto de rostro', me.foto ? '<span class="chip-blue">Cargada</span>' : '<span class="chip-gray">No requerida (staff)</span>')}
           ${me.rol === 'prestador' ? row('Oficio', esc(me.oficio)) + row('Credencial', esc(me.matricula))
             + row('Cuenta de cobro', me.mpCuenta ? `Mercado Pago · ${esc(me.mpCuenta.usuario)} <span class="chip-green ml-1">Vinculada</span> <span class="chip-blue">KYC 6</span>` : '<span class="chip-red">Sin vincular</span>')
-            + (me.deuda ? row('Deuda con OficiosYa', `<span class="text-red-600 font-semibold">${A.money(me.deuda)}</span> · se descuenta hasta el 50% de cada cobro`) : '') + row('Calificación', me.rating ? '★ ' + me.rating + ' · ' + me.trabajos + ' trabajos' : 'Sin trabajos aún') : ''}
+            + (A.pendientesDe((x) => x.prestadorId === me.id).length ? row('Reembolsos pendientes', `<span class="text-red-600 font-semibold">${A.money(A.pendientesDe((x) => x.prestadorId === me.id).reduce((a, x) => a + x.monto, 0))}</span> · tu cuenta queda suspendida hasta que se ejecuten`) : '') + row('Calificación', me.rating ? '★ ' + me.rating + ' · ' + me.trabajos + ' trabajos' : 'Sin trabajos aún') : ''}
           ${me.rol === 'admin' ? row('Permisos', (me.permisos || []).join(', ') || '—') : ''}
         </div>
         ${extra}

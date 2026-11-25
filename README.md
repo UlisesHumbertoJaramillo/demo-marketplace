@@ -24,8 +24,8 @@ Demo navegable de **OficiosYa**, un marketplace de servicios de oficios (plomer�
 | Rol | Qué puede hacer |
 |---|---|
 | **Cliente** | Publica solicitudes, recibe presupuestos, paga por etapa, aprueba o observa el trabajo, califica. |
-| **Prestador** | Cotiza en etapas, ofrece visita técnica, declara materiales con ticket, cobra en su cuenta de Mercado Pago. |
-| **Administrador** | Configura comisiones, costo de MP, plazos y fondo de garantía; ve métricas, denuncias y contracargos. |
+| **Prestador** | Cotiza en etapas (ninguna mayor al 40% del total), ofrece visita técnica, pide el pago de cada compra de materiales y después sube el ticket, cobra en su cuenta de Mercado Pago. |
+| **Administrador** | Configura comisiones, costo de MP, plazos y tamaño máximo por etapa; ve métricas, reembolsos pendientes, denuncias y contracargos. |
 | **Árbitro** | Resuelve disputas de etapas y visitas tras la mediación. |
 
 ## 💳 Pagos — modelo de split de Mercado Pago (sin custodia)
@@ -41,7 +41,8 @@ El cobro usa el **modelo de marketplace / split de pagos** de Mercado Pago. No e
 
 - **Pago por etapa:** al aceptar el presupuesto se paga solo la **etapa 1**; cada etapa se paga **antes de empezarla**, al aprobar la anterior.
 - **Acreditación inmediata:** cada cobro se crea a nombre del prestador (token OAuth de su cuenta MP) y se acredita en el momento. No hay custodia ni plazo de 90 días.
-- **Reembolsos:** si falla por falta de saldo del prestador, OficiosYa reintegra al cliente con su **fondo de garantía** y lo registra como **deuda del prestador** (se recupera de sus próximos cobros).
+- **Solo reembolsos totales por pago:** con el split no se devuelve una parte de un pago ni se le puede cobrar al cliente después. Por eso todo se paga **antes** (cada etapa, cada compra de materiales y cada aumento de precio).
+- **Sin fondo de garantía:** si un reembolso falla por falta de saldo del prestador, queda **pendiente**, el prestador se suspende hasta que se ejecute y se reintenta.
 
 > La comisión se cobra en todos los tipos de cobro (etapas, visita, ajustes, materiales), con tasa configurable por tipo (10% por defecto) y costo de MP estimado (6%) desde el panel admin. El cliente ve un único precio final sin desglose; el detalle solo aparece en recuadros **"SOLO DEMO"** y para admin/arbitraje.
 
@@ -49,9 +50,10 @@ El cobro usa el **modelo de marketplace / split de pagos** de Mercado Pago. No e
 
 - Presupuestos **granulares por etapas** definidas por el prestador.
 - **Visita técnica** cobrable aparte, con confirmación y reprogramación.
-- **Materiales con ticket** (foto obligatoria), aprobados y pagados uno por uno.
+- **Materiales pagados antes de comprarlos**: el prestador pide el pago, el cliente paga y después se sube el ticket (crédito en la próxima etapa si sale más barato, pago complementario si sale más caro).
 - **Ajustes de precio** negociados entre las partes durante el trabajo.
-- **Mediación (72 h) → arbitraje** para disputas, con resolución "corregir la etapa".
+- **Mediación (72 h) → arbitraje** para disputas, sin reembolsos parciales: corregir la etapa, compensar en las etapas sin pagar, reembolso total + recobro de lo hecho, reembolso total o a favor del prestador.
+- **Etapas acotadas:** ninguna etapa puede superar el 40% de la mano de obra (configurable).
 - **Reclamo por garantía** hasta 90 días después del cierre.
 - **Validación de identidad (KYC)** y **matrícula obligatoria** para gas y electricidad.
 - **Contacto seguro** con advertencias y sistema de denuncias.

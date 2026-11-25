@@ -46,7 +46,7 @@
   function formPresupuesto(s, me, d, e, t, mine) {
     const acl = me.aclaraciones || [];
     return `<div class="flex justify-between mt-5 mb-2 items-end"><span class="lbl !mb-0">Etapas del trabajo (las definís vos)</span><span class="font-head text-[10px] text-on-surface-variant">Moneda: ARS ($)</span></div>
-      <p class="text-xs text-on-surface-variant mb-2">Proponé los pasos o etapas en que vas a hacer el trabajo y cotizá cada uno. El cliente las ve y se usan para el seguimiento.</p>
+      <p class="text-xs text-on-surface-variant mb-2">Proponé los pasos o etapas en que vas a hacer el trabajo y cotizá cada uno. El cliente las ve, paga cada una antes de que empiece y se usan para el seguimiento. <b>Ninguna etapa puede superar el ${A.maxEtapaPct()}% de la mano de obra.</b></p>
       <div class="space-y-2">${d.etapas.map((h, i) => `<div class="bg-surface-container-low border ${e['m' + i] ? 'border-red-500' : 'border-outline-variant/60'} p-3 space-y-2">
           <div class="flex justify-between items-center"><span class="font-head text-[10px] font-bold text-primary">ETAPA ${String(i + 1).padStart(2, '0')}</span>
             <button class="text-on-surface-variant hover:text-red-600" data-action="et-del" data-s="${s.id}" data-i="${i}" title="Quitar etapa">${A.icon('delete', '!text-base')}</button></div>
@@ -176,6 +176,12 @@
     if (!d.etapas.length) e.montos = 'Agregá al menos una etapa.';
     d.etapas.forEach((h, i) => { if (!(Number(h.monto) > 0) || !h.nombre.trim()) e['m' + i] = true; });
     if (Object.keys(e).length && !e.montos) e.montos = 'Cada etapa necesita un nombre y un monto mayor a 0.';
+    // Tamaño máximo por etapa: con el split las disputas se resuelven por etapa y sin reembolsos parciales
+    const mano = d.etapas.reduce((a, h) => a + (Number(h.monto) || 0), 0); const max = A.maxEtapaPct();
+    if (!e.montos && mano > 0 && d.etapas.some((h) => Number(h.monto) > (mano * max) / 100)) {
+      d.etapas.forEach((h, i) => { if (Number(h.monto) > (mano * max) / 100) e['m' + i] = true; });
+      e.montos = `Ninguna etapa puede superar el ${max}% de la mano de obra (${A.money((mano * max) / 100)}): dividí las etapas más grandes. Así, si hay un problema, lo que está en juego es acotado.`;
+    }
     if (d.incluyeMateriales) {
       if (!(Number(d.costoMateriales) > 0)) e.costoMateriales = true;
       if (!d.detalleMateriales || !d.detalleMateriales.trim()) e.detalleMateriales = true;

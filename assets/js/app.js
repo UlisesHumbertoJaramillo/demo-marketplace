@@ -105,7 +105,7 @@
           <a href="#/perfil" class="flex items-center gap-2">
             <div class="text-right leading-tight hidden sm:block">
               <div class="font-head text-sm font-semibold">${A.esc(A.fullName(me))}</div>
-              <div class="font-head text-[10px] tracking-wide text-on-surface-variant uppercase">${ROL_LABEL[me.rol]}${me.rol === 'cliente' ? ' · ' + A.money(pendiente) + ' por pagar' : me.rol === 'prestador' ? ' · ' + A.money(pendiente) + ' por cobrar' + (me.deuda ? ' · deuda ' + A.money(me.deuda) : '') : ''}</div>
+              <div class="font-head text-[10px] tracking-wide text-on-surface-variant uppercase">${ROL_LABEL[me.rol]}${me.rol === 'cliente' ? ' · ' + A.money(pendiente) + ' por pagar' : me.rol === 'prestador' ? ' · ' + A.money(pendiente) + ' por cobrar' + (A.pendientesDe((x) => x.prestadorId === me.id).length ? ' · reembolso pendiente' : '') : ''}</div>
             </div>
             ${A.avatar(me, 'w-9 h-9', 'rounded-full')}
           </a>
